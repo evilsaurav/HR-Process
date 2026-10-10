@@ -1,0 +1,9 @@
+flet>=0.24.1
+pandas
+openpyxl
+cryptography
+google-generativeai
+requests
+google-auth
+google-auth-oauthlib
+google-api-python-client
