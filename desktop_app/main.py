@@ -50,19 +50,43 @@ def main(page: ft.Page):
         padding=24,
     )
 
-    def navigate_to(index: int):
+    def navigate_to(index_or_target, **kwargs):
+        if isinstance(index_or_target, str):
+            mapping = {
+                "dashboard": 0,
+                "joining": 1,
+                "joining_process": 1,
+                "keka": 2,
+                "keka_sync": 2,
+                "documents": 3,
+                "document_generation": 3,
+                "settings": 4,
+            }
+            index = mapping.get(index_or_target.lower(), 0)
+        else:
+            index = int(index_or_target)
+
         rail.selected_index = index
         if index == 0:
-            content_area.content = dashboard_view(page)
+            content_area.content = dashboard_view(page, on_navigate=navigate_to)
         elif index == 1:
-            content_area.content = joining_process_view(page)
+            initial_filter = kwargs.get("filter") or kwargs.get("initial_filter")
+            content_area.content = joining_process_view(page, initial_filter=initial_filter)
         elif index == 2:
             content_area.content = keka_sync_view(page)
         elif index == 3:
-            content_area.content = document_generation_view(page)
+            initial_tab = kwargs.get("tab") if "tab" in kwargs else kwargs.get("initial_tab", 0)
+            content_area.content = document_generation_view(page, initial_tab=int(initial_tab or 0))
         elif index == 4:
             content_area.content = settings_view(page)
         page.update()
+
+    page.on_navigate = navigate_to
+    if hasattr(page, "session"):
+        try:
+            page.session.set("navigate_to", navigate_to)
+        except Exception:
+            pass
 
     rail = ft.NavigationRail(
         selected_index=0,
@@ -109,7 +133,7 @@ def main(page: ft.Page):
     )
 
     # Initial view (Executive Dashboard)
-    content_area.content = dashboard_view(page)
+    content_area.content = dashboard_view(page, on_navigate=navigate_to)
 
     # Main layout: Sidebar NavigationRail on left, content area on right, global footer at bottom
     body_row = ft.Row([

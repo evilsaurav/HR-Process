@@ -13,6 +13,14 @@ from typing import Dict, List, Any, Optional
 from config import STATUS_OPTIONS
 from database import db_manager
 
+try:
+    from services import smart_rule_detector
+except ImportError:
+    try:
+        from desktop_app.services import smart_rule_detector
+    except ImportError:
+        smart_rule_detector = None
+
 
 def _parse_date_safe(date_str: Any) -> Optional[datetime.date]:
     """Safely parses various date formats into datetime.date."""
@@ -189,4 +197,169 @@ def get_keka_pending_summary() -> Dict[str, Any]:
     return {
         "count": len(pending),
         "candidates": pending
+    }
+
+
+def get_recent_email_dispatches(limit: int = 5) -> List[Dict[str, Any]]:
+    """Returns recent email dispatch logs ordered newest first."""
+    try:
+        return db_manager.get_email_logs(limit=limit)
+    except Exception:
+        return []
+
+
+def get_recent_document_generations(limit: int = 5) -> List[Dict[str, Any]]:
+    """Returns recent document generation logs ordered newest first with candidate details."""
+    try:
+        conn = db_manager.get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT d.id, d.candidate_id, c.candidate_name, d.document_type,
+                   d.reference_number, d.generated_date, d.file_path, d.generated_by
+            FROM document_generation_log d
+            LEFT JOIN candidates c ON d.candidate_id = c.id
+            ORDER BY d.id DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "id": r[0],
+                "candidate_id": r[1],
+                "candidate_name": r[2] or "Unknown",
+                "document_type": r[3] or "-",
+                "reference_number": r[4] or "-",
+                "generated_date": r[5] or "-",
+                "file_path": r[6] or "",
+                "generated_by": r[7] or "HR Desktop",
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+
+def get_dashboard_stats() -> Dict[str, Any]:
+    """
+    Aggregates high-level executive dashboard metrics:
+    - pending_welcome_emails: Candidates where status == 'Selected' and welcome email not sent
+    - letters_to_generate: Actionable suggestions identified by smart rule detector
+    - staged_letters_ready: Count of records in document_staging with status == 'Staged'
+    - dispatched_today: Count of records in email_log with status in ('Sent', 'Success') and today's date
+    - Pipeline status counts: total_candidates, selected_candidates, in_interview, in_pipeline, joined_candidates, etc.
+    - Life-cycle due counts: exp_due_count, increment_due_count, keka_pending_count
+    """
+    db_manager.init_db()
+    conn = db_manager.get_connection()
+    cur = conn.cursor()
+
+    # 1. Pending Welcome Emails
+    cur.execute("""
+        SELECT COUNT(*) FROM candidates
+        WHERE status = 'Selected'
+          AND (welcome_email_sent = 0 OR welcome_email_sent IS NULL)
+          AND (archived = 0 OR archived IS NULL)
+    """)
+    row_welcome = cur.fetchone()
+    pending_welcome_emails = row_welcome[0] if row_welcome else 0
+
+    # 2. Letters to Generate (Smart Rule Detector)
+    letters_to_generate = 0
+    try:
+        detector = smart_rule_detector
+        if not detector:
+            try:
+                from services import smart_rule_detector as s_det
+                detector = s_det
+            except ImportError:
+                try:
+                    from desktop_app.services import smart_rule_detector as s_det
+                    detector = s_det
+                except ImportError:
+                    detector = None
+        if detector and hasattr(detector, "scan_all_candidates_for_document_needs"):
+            needs = detector.scan_all_candidates_for_document_needs()
+            letters_to_generate = len(needs) if needs else 0
+    except Exception as ex:
+        print(f"Error scanning candidates for document needs: {ex}")
+        letters_to_generate = 0
+
+    # 3. Staged Letters Ready
+    try:
+        cur.execute("SELECT COUNT(*) FROM document_staging WHERE status = 'Staged'")
+        row_staged = cur.fetchone()
+        staged_letters_ready = row_staged[0] if row_staged else 0
+    except Exception:
+        staged_letters_ready = 0
+
+    # 4. Dispatched Today
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+    try:
+        cur.execute("""
+            SELECT COUNT(*) FROM email_log
+            WHERE (status = 'Sent' OR status = 'Success' OR LOWER(status) IN ('sent', 'success'))
+              AND (timestamp LIKE ? OR SUBSTR(timestamp, 1, 10) = ?)
+        """, (f"{today_str}%", today_str))
+        row_disp = cur.fetchone()
+        dispatched_today = row_disp[0] if row_disp else 0
+    except Exception:
+        dispatched_today = 0
+
+    # 5. Candidate Pipeline Breakdown
+    cur.execute("""
+        SELECT status, COUNT(*) FROM candidates
+        WHERE (archived = 0 OR archived IS NULL)
+        GROUP BY status
+    """)
+    status_rows = cur.fetchall()
+    conn.close()
+
+    status_counts = {opt: 0 for opt in STATUS_OPTIONS}
+    status_counts["Selected"] = 0
+    total_candidates = 0
+    for st, count in status_rows:
+        st_clean = str(st).strip() if st else "Applied"
+        status_counts[st_clean] = count
+        total_candidates += count
+
+    selected_candidates = status_counts.get("Selected", 0)
+    in_interview = status_counts.get("Interview", 0)
+    applied_candidates = status_counts.get("Applied", 0)
+    shortlisted_candidates = status_counts.get("Shortlisted", 0)
+    offer_sent_candidates = status_counts.get("Offer Sent", 0)
+    joined_candidates = status_counts.get("Joined", 0)
+    rejected_candidates = status_counts.get("Rejected", 0)
+    in_pipeline = in_interview + shortlisted_candidates + applied_candidates
+
+    # 6. Life-cycle Due Counts
+    exp_due = get_experience_certificate_due_list()
+    exp_due_count = len(exp_due)
+
+    inc_due = get_increment_due_list()
+    inc_upcoming_count = len(inc_due.get("upcoming", []))
+    inc_overdue_count = len(inc_due.get("overdue", []))
+    increment_due_count = inc_upcoming_count + inc_overdue_count
+
+    keka_summary = get_keka_pending_summary()
+    keka_pending_count = keka_summary.get("count", 0)
+
+    return {
+        "pending_welcome_emails": pending_welcome_emails,
+        "letters_to_generate": letters_to_generate,
+        "staged_letters_ready": staged_letters_ready,
+        "dispatched_today": dispatched_today,
+        "total_candidates": total_candidates,
+        "selected_candidates": selected_candidates,
+        "in_interview": in_interview,
+        "in_pipeline": in_pipeline,
+        "joined_candidates": joined_candidates,
+        "applied_candidates": applied_candidates,
+        "shortlisted_candidates": shortlisted_candidates,
+        "offer_sent_candidates": offer_sent_candidates,
+        "rejected_candidates": rejected_candidates,
+        "status_overview": status_counts,
+        "exp_due_count": exp_due_count,
+        "increment_due_count": increment_due_count,
+        "keka_pending_count": keka_pending_count,
     }

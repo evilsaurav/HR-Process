@@ -171,7 +171,7 @@ def get_doc_badge(doc_type: str) -> ft.Container:
         return status_badge(doc_type.replace("_", " ").title())
 
 
-def document_generation_view(page: ft.Page):
+def document_generation_view(page: ft.Page, initial_tab: int = 0):
     db_manager.init_db()
 
     # Centralized State
@@ -2131,5 +2131,8 @@ def document_generation_view(page: ft.Page):
     view_column.tab1_container = tab1_container
     view_column.tab2_container = tab2_container
     view_column.tab3_container = tab3_container
+
+    if initial_tab in (1, 2):
+        switch_tab(initial_tab)
 
     return view_column

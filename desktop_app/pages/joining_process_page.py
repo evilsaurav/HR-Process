@@ -28,7 +28,7 @@ from utils.ui_theme import (
 )
 
 
-def joining_process_view(page: ft.Page):
+def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
     # Ensure DB is initialized
     db_manager.init_db()
 
@@ -84,7 +84,14 @@ def joining_process_view(page: ft.Page):
     selected_candidate_ids = set()
 
     # Quick filter tab state: "all" or "pending_welcome"
-    quick_filter_state = {"mode": "all"}
+    init_mode = "all"
+    if initial_filter:
+        flt_str = str(initial_filter).lower().strip()
+        if "selected" in flt_str or "pending" in flt_str:
+            init_mode = "pending_welcome"
+
+    quick_filter_state = {"mode": init_mode}
+    is_pending_init = (init_mode == "pending_welcome")
 
     # Current candidate list cache for select-all operations
     current_candidates_cache = {"list": []}
@@ -94,8 +101,8 @@ def joining_process_view(page: ft.Page):
             ft.Icon(ft.Icons.PEOPLE_ALT_OUTLINED, size=16),
             ft.Text("All Candidates", weight=ft.FontWeight.W_600),
         ], spacing=6, tight=True, alignment=ft.MainAxisAlignment.CENTER),
-        bgcolor=PRIMARY_COLOR,
-        color=ft.Colors.WHITE,
+        bgcolor=COLOR_CARD_BG_HOVER if is_pending_init else PRIMARY_COLOR,
+        color=COLOR_TEXT_PRIMARY if is_pending_init else ft.Colors.WHITE,
         on_click=lambda e: set_quick_filter("all"),
     )
 
@@ -113,13 +120,23 @@ def joining_process_view(page: ft.Page):
             ft.Text("🎉 Selected (Pending Welcome Email)", weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY),
             pending_welcome_badge_container,
         ], spacing=6, tight=True, alignment=ft.MainAxisAlignment.CENTER),
-        bgcolor=COLOR_CARD_BG_HOVER,
-        color=COLOR_TEXT_PRIMARY,
+        bgcolor=PRIMARY_COLOR if is_pending_init else COLOR_CARD_BG_HOVER,
+        color=ft.Colors.WHITE if is_pending_init else COLOR_TEXT_PRIMARY,
         on_click=lambda e: set_quick_filter("pending_welcome"),
     )
 
     def set_quick_filter(mode: str):
         quick_filter_state["mode"] = mode
+        if mode == "pending_welcome":
+            tab_pending_button.bgcolor = PRIMARY_COLOR
+            tab_pending_button.color = ft.Colors.WHITE
+            tab_all_button.bgcolor = COLOR_CARD_BG_HOVER
+            tab_all_button.color = COLOR_TEXT_PRIMARY
+        else:
+            tab_all_button.bgcolor = PRIMARY_COLOR
+            tab_all_button.color = ft.Colors.WHITE
+            tab_pending_button.bgcolor = COLOR_CARD_BG_HOVER
+            tab_pending_button.color = COLOR_TEXT_PRIMARY
         refresh_candidates()
 
     btn_review_send_welcome_text = ft.Text("✉️ Review & Send Welcome Emails", weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)
