@@ -582,6 +582,47 @@ if __name__ == "__main__":
 
 ---
 
+### Task 10: Keka Duplicate Employee Detection & Interactive Conflict Resolution
+
+**Files to modify**:
+- [`desktop_app/database/db_manager.py`](file:///d:/ignou/Suraj%20HR%20Project/desktop_app/database/db_manager.py)
+- [`desktop_app/services/keka_sync_service.py`](file:///d:/ignou/Suraj%20HR%20Project/desktop_app/services/keka_sync_service.py)
+- [`desktop_app/pages/keka_sync_page.py`](file:///d:/ignou/Suraj%20HR%20Project/desktop_app/pages/keka_sync_page.py)
+
+**Step-by-step instructions**:
+1. In `db_manager.py`:
+   - Implement `get_candidate_by_employee_number(employee_number: str) -> Optional[dict]`.
+   - Update `insert_keka_employee`: Check if `employee_number` already exists in `candidates`. If it exists, prevent inserting a duplicate row; update the existing record or return its ID to guarantee zero duplicate employees.
+2. In `keka_sync_service.py`:
+   - Implement `detect_keka_conflicts_and_duplicates(file_path: str) -> dict`:
+     - Detects internal duplicate Employee IDs in the sheet.
+     - Compares sheet records against existing database records by Employee ID and Mobile.
+     - Categorizes records into:
+       - `new_employees`: Brand new staff not in DB.
+       - `identical_matches`: Already in DB with matching data.
+       - `conflicting_employees`: Already in DB with differing values (salary, designation, department, address, mobile), providing exact `old_val` vs `new_val` diffs.
+       - `is_sheet_reupload`: True if >= 50% of sheet records already exist in DB.
+   - Implement `sync_rich_keka_sheet_with_resolutions(file_path: str, resolutions: dict, allow_new_inserts: bool = True) -> dict`:
+     - Applies resolution per conflicting employee (`'update'` = overwrite DB with sheet data; `'keep'` = retain existing DB data).
+     - Inserts new employees cleanly.
+     - Returns summary of new, updated, and kept records.
+3. In `keka_sync_page.py`:
+   - On sync click, run `detect_keka_conflicts_and_duplicates` first.
+   - If conflicts or sheet re-upload detected:
+     - Open Warning & Resolution Dialog:
+       - Displays clear plain-English warning: *"⚠️ [N] Existing Employee Records / Sheet Re-upload Detected"*.
+       - Shows comparison list with Employee ID, Name, and Changed Fields (e.g. Salary: `₹45,000` -> `₹55,000`, Designation: `Nurse` -> `Sr Nurse`).
+       - Provides 2 prominent choices:
+         - **"🔄 Update Existing with Sheet Data"**: Updates existing records with incoming sheet data.
+         - **"🛡️ Keep Database Records (Skip Duplicates)"**: Preserves existing database records and only imports new employees.
+       - Proceeds with `sync_rich_keka_sheet_with_resolutions` based on user's choice.
+4. Create verification script `desktop_app/scripts/test_task10_keka_duplicate_resolution.py`.
+
+**Verification command**:
+`python desktop_app/scripts/test_task10_keka_duplicate_resolution.py`
+
+---
+
 ## 3. Self-Review & Adherence to Constraints
 
 - **YAGNI / Simplicity**: Built directly on top of existing SQLite database, Flet components, and Word templates. No external microservices or heavy message brokers needed.
