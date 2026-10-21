@@ -28,7 +28,8 @@ Thumbs.db
 credentials.json
 token.json
 
-# Ignore all legacy root items, keep only desktop_app and .gitignore
+# Ignore all legacy root items, keep only desktop_app, .gitignore, and launchers
 /*
 !/desktop_app/
 !/.gitignore
+!/Launch_DFY_HRMS.bat
