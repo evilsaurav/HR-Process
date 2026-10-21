@@ -391,6 +391,43 @@ def update_candidate_extra_details(candidate_id: int, father_name: str, full_add
     conn.commit()
     conn.close()
 
+def update_candidate(candidate_id: int, fields: dict) -> bool:
+    """
+    Updates any valid columns of a candidate by ID.
+    Used for inline data corrections and general profile updates.
+    """
+    if candidate_id is None or not fields:
+        return False
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(candidates)")
+        valid_cols = {row[1] for row in cur.fetchall()}
+
+        update_fields = {}
+        for k, v in fields.items():
+            if k in valid_cols:
+                update_fields[k] = str(v).strip() if v is not None else ""
+
+        if not update_fields:
+            return False
+
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        update_fields["last_updated"] = now
+
+        set_clauses = [f"{col} = ?" for col in update_fields.keys()]
+        values = list(update_fields.values()) + [int(candidate_id)]
+
+        cur.execute(f"UPDATE candidates SET {', '.join(set_clauses)} WHERE id = ?", values)
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        print("update_candidate error:", e)
+        return False
+    finally:
+        conn.close()
+
+
 def update_candidate_keka_master(candidate_id: int, fields: dict) -> bool:
     """
     Updates candidate with non-empty fields from Keka master data.

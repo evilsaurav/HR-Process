@@ -316,3 +316,34 @@ def send_document_email(
             error_message=user_msg, candidate_id=candidate_id
         )
         return False, user_msg, is_transient
+
+
+def send_email_smtp(
+    to_addr: str = None,
+    subject: str = "",
+    body: str = "",
+    attachment_path: str = None,
+    recipient_email: str = None,
+    candidate_id: int = None,
+    document_type: str = None,
+    recipient_name: str = None,
+    sent_by: str = "HR Desktop"
+) -> tuple[bool, str]:
+    """
+    Convenience wrapper for sending document emails using SMTP / configured Gmail credentials,
+    logging to email_log.
+    Returns (success: bool, message: str).
+    """
+    target_addr = to_addr or recipient_email
+    ok, msg, _ = send_document_email(
+        to_addr=target_addr,
+        subject=subject,
+        body=body,
+        attachment_path=attachment_path,
+        candidate_id=candidate_id,
+        document_type=document_type,
+        recipient_name=recipient_name,
+        sent_by=sent_by
+    )
+    return ok, msg
+

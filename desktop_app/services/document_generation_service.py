@@ -367,6 +367,27 @@ def build_placeholder_mapping(candidate: dict, document_type: str, extra_fields:
     return res
 
 
+def normalize_document_type(document_type: str) -> str:
+    """
+    Normalizes document type strings across UI and service variants.
+    e.g. 'offer_letter' -> 'offer', 'increment_letter' -> 'increment'
+    """
+    dt = (document_type or "").strip().lower()
+    if dt in ["offer", "offer_letter"]:
+        return "offer"
+    if dt in ["extension", "extension_letter"]:
+        return "extension"
+    if dt in ["increment", "increment_letter"]:
+        return "increment"
+    if dt in ["termination", "termination_letter"]:
+        return "termination"
+    if dt in ["experience", "experience_certificate", "experience_letter"]:
+        return "experience_certificate"
+    if dt in ["salary", "salary_certificate", "salary_letter"]:
+        return "salary_certificate"
+    return dt
+
+
 def resolve_template(document_type: str, candidate: dict, manual_designation_override: str = None) -> dict:
     """
     Resolves the template file path for the requested document type and candidate.
@@ -378,10 +399,10 @@ def resolve_template(document_type: str, candidate: dict, manual_designation_ove
             "matched_designation": str or None
         }
     """
-    doc_type_lower = (document_type or "").strip().lower()
+    norm_type = normalize_document_type(document_type)
 
     # 1. Termination: Always single generic template
-    if doc_type_lower in ["termination", "termination_letter"]:
+    if norm_type == "termination":
         path = db_manager.get_template_path("termination", "Generic")
         if not path:
             path = db_manager.resolve_template_path("termination/termination_letter.docx")
@@ -400,10 +421,10 @@ def resolve_template(document_type: str, candidate: dict, manual_designation_ove
         }
 
     # 2. Experience / Salary Certificates: Always standard certificate template
-    if doc_type_lower in ["experience", "experience_certificate", "salary", "salary_certificate"]:
+    if norm_type in ["experience_certificate", "salary_certificate"]:
         # Check database mappings for certificate
         path = (
-            db_manager.get_template_path(doc_type_lower, "Standard Experience Certificate")
+            db_manager.get_template_path(norm_type, "Standard Experience Certificate")
             or db_manager.get_template_path("experience_certificate", "Standard Experience Certificate")
             or db_manager.get_template_path("salary_certificate", "Standard Salary Certificate")
             or db_manager.resolve_template_path("templates/certificate/experience_salary.docx")
@@ -423,12 +444,12 @@ def resolve_template(document_type: str, candidate: dict, manual_designation_ove
         }
 
     # 3. Designation-dependent types: Offer, Extension, Increment
-    available_templates = db_manager.get_templates_by_type(doc_type_lower)
+    available_templates = db_manager.get_templates_by_type(norm_type)
     available_labels = [t["designation_label"] for t in available_templates]
 
     # Manual designation override provided by user
     if manual_designation_override:
-        path = db_manager.get_template_path(doc_type_lower, manual_designation_override)
+        path = db_manager.get_template_path(norm_type, manual_designation_override)
         if path and os.path.exists(path):
             return {
                 "found": True,
@@ -442,7 +463,7 @@ def resolve_template(document_type: str, candidate: dict, manual_designation_ove
 
     # Exact case-sensitive match
     if candidate_desig:
-        path = db_manager.get_template_path(doc_type_lower, candidate_desig)
+        path = db_manager.get_template_path(norm_type, candidate_desig)
         if path and os.path.exists(path):
             return {
                 "found": True,
