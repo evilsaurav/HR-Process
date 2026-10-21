@@ -39,7 +39,9 @@ def init_db():
             employee_number TEXT,
             relieving_date TEXT,
             archived INTEGER DEFAULT 0,
-            archived_at TEXT
+            archived_at TEXT,
+            welcome_email_sent INTEGER DEFAULT 0,
+            welcome_email_sent_at TEXT
         )
     """)
 
@@ -113,6 +115,8 @@ def init_db():
         ("extension_of_service_till", "TEXT"),
         ("extension_of_service_months", "TEXT"),
         ("project_test", "TEXT"),
+        ("welcome_email_sent", "INTEGER DEFAULT 0"),
+        ("welcome_email_sent_at", "TEXT"),
     ]
     for col_name, col_type in new_candidate_columns:
         if col_name not in existing_cand_cols:
@@ -248,6 +252,55 @@ def init_db():
             FOREIGN KEY (candidate_id) REFERENCES candidates(id)
         )
     """)
+
+    # Document Staging Queue for Human-in-the-Loop review and batch dispatch
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS document_staging (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id INTEGER NOT NULL,
+            document_type TEXT NOT NULL,
+            status TEXT DEFAULT 'Staged',
+            doc_file_path TEXT NOT NULL,
+            pdf_file_path TEXT,
+            preferred_format TEXT DEFAULT 'pdf',
+            recipient_email TEXT NOT NULL,
+            recipient_name TEXT NOT NULL,
+            email_subject TEXT NOT NULL,
+            email_body TEXT NOT NULL,
+            reference_number TEXT,
+            extra_fields_json TEXT,
+            discrepancy_warnings_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            dispatched_at TEXT,
+            FOREIGN KEY(candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
+        )
+    """)
+
+    # Idempotent column check for document_staging
+    cur.execute("PRAGMA table_info(document_staging)")
+    existing_staging_cols = {row[1] for row in cur.fetchall()}
+    staging_cols_to_check = [
+        ("candidate_id", "INTEGER"),
+        ("document_type", "TEXT"),
+        ("status", "TEXT DEFAULT 'Staged'"),
+        ("doc_file_path", "TEXT"),
+        ("pdf_file_path", "TEXT"),
+        ("preferred_format", "TEXT DEFAULT 'pdf'"),
+        ("recipient_email", "TEXT"),
+        ("recipient_name", "TEXT"),
+        ("email_subject", "TEXT"),
+        ("email_body", "TEXT"),
+        ("reference_number", "TEXT"),
+        ("extra_fields_json", "TEXT"),
+        ("discrepancy_warnings_json", "TEXT"),
+        ("created_at", "TEXT"),
+        ("updated_at", "TEXT"),
+        ("dispatched_at", "TEXT"),
+    ]
+    for col_name, col_type in staging_cols_to_check:
+        if col_name not in existing_staging_cols:
+            cur.execute(f"ALTER TABLE document_staging ADD COLUMN {col_name} {col_type}")
 
     conn.commit()
     conn.close()
@@ -1114,4 +1167,302 @@ def get_email_logs(candidate_id: int = None, limit: int = 200) -> list:
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Document Staging & Welcome Email Pipeline Functions
+# ---------------------------------------------------------------------------
+
+def create_staging_record(
+    candidate_id: int,
+    document_type: str,
+    status: str = "Staged",
+    doc_file_path: str = "",
+    pdf_file_path: str = None,
+    preferred_format: str = "pdf",
+    recipient_email: str = "",
+    recipient_name: str = "",
+    email_subject: str = "",
+    email_body: str = "",
+    reference_number: str = None,
+    extra_fields: dict = None,
+    discrepancy_warnings: list = None
+) -> int:
+    """
+    Inserts a newly prepared draft document into document_staging queue.
+    Returns the newly generated staging ID.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    extra_fields_json = (
+        json.dumps(extra_fields, ensure_ascii=False)
+        if isinstance(extra_fields, (dict, list))
+        else (extra_fields or None)
+    )
+    discrepancy_warnings_json = (
+        json.dumps(discrepancy_warnings, ensure_ascii=False)
+        if isinstance(discrepancy_warnings, (dict, list))
+        else (discrepancy_warnings or None)
+    )
+
+    cur.execute("""
+        INSERT INTO document_staging (
+            candidate_id, document_type, status, doc_file_path, pdf_file_path,
+            preferred_format, recipient_email, recipient_name, email_subject, email_body,
+            reference_number, extra_fields_json, discrepancy_warnings_json,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        candidate_id,
+        document_type,
+        status,
+        doc_file_path,
+        pdf_file_path,
+        preferred_format,
+        recipient_email,
+        recipient_name,
+        email_subject,
+        email_body,
+        reference_number,
+        extra_fields_json,
+        discrepancy_warnings_json,
+        now,
+        now
+    ))
+    staging_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return staging_id
+
+
+def get_staging_records(status: str = "Staged") -> list:
+    """
+    Retrieves records from document_staging with candidate details joined.
+    If status is None or 'All', returns all staging records regardless of status.
+    Ordered newest first.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    query = """
+        SELECT 
+            s.id, s.candidate_id, s.document_type, s.status, s.doc_file_path,
+            s.pdf_file_path, s.preferred_format, s.recipient_email, s.recipient_name,
+            s.email_subject, s.email_body, s.reference_number, s.extra_fields_json,
+            s.discrepancy_warnings_json, s.created_at, s.updated_at, s.dispatched_at,
+            c.candidate_name, c.employee_number, c.applied_designation, c.department,
+            c.mobile, c.negotiated_salary
+        FROM document_staging s
+        LEFT JOIN candidates c ON s.candidate_id = c.id
+    """
+    params = []
+    if status and status.lower() != "all":
+        query += " WHERE s.status = ?"
+        params.append(status)
+    query += " ORDER BY s.id DESC"
+
+    cur.execute(query, params)
+    cols = [d[0] for d in cur.description]
+    rows = []
+    for r in cur.fetchall():
+        record = dict(zip(cols, r))
+        if record.get("extra_fields_json"):
+            try:
+                record["extra_fields"] = json.loads(record["extra_fields_json"])
+            except Exception:
+                record["extra_fields"] = {}
+        else:
+            record["extra_fields"] = {}
+
+        if record.get("discrepancy_warnings_json"):
+            try:
+                record["discrepancy_warnings"] = json.loads(record["discrepancy_warnings_json"])
+            except Exception:
+                record["discrepancy_warnings"] = []
+        else:
+            record["discrepancy_warnings"] = []
+
+        rows.append(record)
+
+    conn.close()
+    return rows
+
+
+def get_staging_record_by_id(staging_id: int):
+    """
+    Retrieves a single staging record by ID with joined candidate information.
+    Returns None if not found.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT 
+            s.id, s.candidate_id, s.document_type, s.status, s.doc_file_path,
+            s.pdf_file_path, s.preferred_format, s.recipient_email, s.recipient_name,
+            s.email_subject, s.email_body, s.reference_number, s.extra_fields_json,
+            s.discrepancy_warnings_json, s.created_at, s.updated_at, s.dispatched_at,
+            c.candidate_name, c.employee_number, c.applied_designation, c.department,
+            c.mobile, c.negotiated_salary
+        FROM document_staging s
+        LEFT JOIN candidates c ON s.candidate_id = c.id
+        WHERE s.id = ?
+    """, (staging_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    cols = [d[0] for d in cur.description]
+    record = dict(zip(cols, row))
+    if record.get("extra_fields_json"):
+        try:
+            record["extra_fields"] = json.loads(record["extra_fields_json"])
+        except Exception:
+            record["extra_fields"] = {}
+    else:
+        record["extra_fields"] = {}
+
+    if record.get("discrepancy_warnings_json"):
+        try:
+            record["discrepancy_warnings"] = json.loads(record["discrepancy_warnings_json"])
+        except Exception:
+            record["discrepancy_warnings"] = []
+    else:
+        record["discrepancy_warnings"] = []
+
+    conn.close()
+    return record
+
+
+def update_staging_record(staging_id: int, **kwargs) -> bool:
+    """
+    Updates fields on an existing staging record.
+    Supports extra_fields (dict) and discrepancy_warnings (list).
+    """
+    if not kwargs:
+        return False
+
+    valid_cols = {
+        "candidate_id", "document_type", "status", "doc_file_path", "pdf_file_path",
+        "preferred_format", "recipient_email", "recipient_name", "email_subject",
+        "email_body", "reference_number", "extra_fields_json", "discrepancy_warnings_json",
+        "created_at", "updated_at", "dispatched_at"
+    }
+
+    updates = {}
+    for k, v in kwargs.items():
+        if k == "extra_fields":
+            updates["extra_fields_json"] = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+        elif k == "discrepancy_warnings":
+            updates["discrepancy_warnings_json"] = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+        elif k in valid_cols:
+            updates[k] = v
+
+    if not updates:
+        return False
+
+    if "updated_at" not in updates:
+        updates["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+    params = list(updates.values())
+    params.append(staging_id)
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE document_staging SET {set_clause} WHERE id = ?", params)
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        print(f"Error updating staging record {staging_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def delete_staging_record(staging_id: int) -> bool:
+    """
+    Deletes a staging record from document_staging by ID.
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM document_staging WHERE id = ?", (staging_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        print(f"Error deleting staging record {staging_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def update_candidate_welcome_email_status(candidate_id: int, sent: bool = True) -> bool:
+    """
+    Updates the candidate's welcome email sent status and timestamp.
+    """
+    conn = get_connection()
+    try:
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sent_val = 1 if sent else 0
+        sent_at = now if sent else None
+        conn.execute("""
+            UPDATE candidates
+            SET welcome_email_sent = ?,
+                welcome_email_sent_at = ?,
+                last_updated = ?
+            WHERE id = ?
+        """, (sent_val, sent_at, now, candidate_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating candidate welcome email status: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_selected_candidates_pending_welcome() -> list:
+    """
+    Returns non-archived candidates who are in 'Selected' status and have not yet
+    received a welcome email (welcome_email_sent is 0 or NULL).
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT * FROM candidates
+        WHERE status = 'Selected'
+          AND (welcome_email_sent = 0 OR welcome_email_sent IS NULL)
+          AND (archived = 0 OR archived IS NULL)
+        ORDER BY id DESC
+    """)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_dashboard_staging_counts() -> dict:
+    """
+    Returns counts of documents in staging grouped by status, along with total staged.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT status, COUNT(*) FROM document_staging GROUP BY status")
+    counts = {"staged": 0, "approved": 0, "dispatched": 0, "failed": 0, "total": 0}
+    total = 0
+    for status, count in cur.fetchall():
+        key = (status or "").strip().lower()
+        counts[key] = count
+        total += count
+    counts["total"] = total
+    counts["Staged"] = counts.get("staged", 0)
+    counts["Approved"] = counts.get("approved", 0)
+    counts["Dispatched"] = counts.get("dispatched", 0)
+    counts["Failed"] = counts.get("failed", 0)
+    conn.close()
+    return counts
+
 
