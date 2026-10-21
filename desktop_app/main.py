@@ -1,11 +1,36 @@
 from utils.flet_compat import apply_flet_compat_shims
 apply_flet_compat_shims()
 
+import threading
+import time
 import flet as ft
 from config import APP_TITLE, PRIMARY_COLOR
 from database import db_manager
+from services import email_scheduler_service
+from pages.dashboard_page import dashboard_view
 from pages.joining_process_page import joining_process_view
+from pages.keka_sync_page import keka_sync_view
+from pages.document_generation_page import document_generation_view
 from pages.settings_page import settings_view
+from utils.ui_theme import app_footer
+
+_scheduler_started = False
+
+
+def _run_email_scheduler_loop():
+    while True:
+        try:
+            email_scheduler_service.process_due_scheduled_emails()
+        except Exception:
+            pass
+        time.sleep(30)
+
+
+def start_scheduler_thread():
+    global _scheduler_started
+    if not _scheduler_started:
+        _scheduler_started = True
+        threading.Thread(target=_run_email_scheduler_loop, daemon=True).start()
 
 
 def main(page: ft.Page):
@@ -17,6 +42,7 @@ def main(page: ft.Page):
 
     # Initialize SQLite Database
     db_manager.init_db()
+    start_scheduler_thread()
 
     # Content area that switches pages
     content_area = ft.Container(
@@ -27,8 +53,14 @@ def main(page: ft.Page):
     def navigate_to(index: int):
         rail.selected_index = index
         if index == 0:
-            content_area.content = joining_process_view(page)
+            content_area.content = dashboard_view(page)
         elif index == 1:
+            content_area.content = joining_process_view(page)
+        elif index == 2:
+            content_area.content = keka_sync_view(page)
+        elif index == 3:
+            content_area.content = document_generation_view(page)
+        elif index == 4:
             content_area.content = settings_view(page)
         page.update()
 
@@ -37,7 +69,7 @@ def main(page: ft.Page):
         label_type=ft.NavigationRailLabelType.ALL,
         min_width=100,
         min_extended_width=200,
-        bgcolor=ft.Colors.GREY_950,
+        bgcolor=ft.Colors.GREY_900,
         indicator_color=PRIMARY_COLOR,
         leading=ft.Container(
             padding=ft.padding.only(top=16, bottom=16),
@@ -48,9 +80,24 @@ def main(page: ft.Page):
         ),
         destinations=[
             ft.NavigationRailDestination(
+                icon=ft.Icons.DASHBOARD_OUTLINED,
+                selected_icon=ft.Icons.DASHBOARD,
+                label="Dashboard",
+            ),
+            ft.NavigationRailDestination(
                 icon=ft.Icons.BADGE_OUTLINED,
                 selected_icon=ft.Icons.BADGE,
                 label="Joining Process",
+            ),
+            ft.NavigationRailDestination(
+                icon=ft.Icons.SYNC_ROUNDED,
+                selected_icon=ft.Icons.SYNC,
+                label="Keka Sync",
+            ),
+            ft.NavigationRailDestination(
+                icon=ft.Icons.DESCRIPTION_OUTLINED,
+                selected_icon=ft.Icons.DESCRIPTION,
+                label="Document Generator",
             ),
             ft.NavigationRailDestination(
                 icon=ft.Icons.SETTINGS_OUTLINED,
@@ -61,18 +108,26 @@ def main(page: ft.Page):
         on_change=lambda e: navigate_to(e.control.selected_index),
     )
 
-    # Initial view
-    content_area.content = joining_process_view(page)
+    # Initial view (Executive Dashboard)
+    content_area.content = dashboard_view(page)
 
-    # Main layout: Sidebar NavigationRail on left, content area on right
+    # Main layout: Sidebar NavigationRail on left, content area on right, global footer at bottom
+    body_row = ft.Row([
+        rail,
+        ft.VerticalDivider(width=1, color=ft.Colors.GREY_800),
+        content_area,
+    ], expand=True, spacing=0)
+
     page.add(
-        ft.Row([
-            rail,
-            ft.VerticalDivider(width=1, color=ft.Colors.GREY_800),
-            content_area,
+        ft.Column([
+            body_row,
+            app_footer(),
         ], expand=True, spacing=0)
     )
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    if hasattr(ft, "run"):
+        ft.run(main)
+    else:
+        ft.app(target=main)

@@ -1,5 +1,6 @@
 import sqlite3
 import datetime
+import json
 from config import DB_PATH
 from services.encryption import encrypt_text, decrypt_text
 
@@ -29,9 +30,93 @@ def init_db():
             status TEXT DEFAULT 'Applied',
             source_sheet_name TEXT,
             upload_date TEXT,
-            last_updated TEXT
+            last_updated TEXT,
+            father_name TEXT,
+            full_address TEXT,
+            gender TEXT,
+            department TEXT,
+            date_joined TEXT,
+            employee_number TEXT,
+            relieving_date TEXT,
+            archived INTEGER DEFAULT 0,
+            archived_at TEXT
         )
     """)
+
+    # Safe idempotent migration: add new columns if missing in existing database
+    cur.execute("PRAGMA table_info(candidates)")
+    existing_cand_cols = {row[1] for row in cur.fetchall()}
+    new_candidate_columns = [
+        ("father_name", "TEXT"),
+        ("full_address", "TEXT"),
+        ("gender", "TEXT"),
+        ("department", "TEXT"),
+        ("date_joined", "TEXT"),
+        ("employee_number", "TEXT"),
+        ("relieving_date", "TEXT"),
+        ("archived", "INTEGER DEFAULT 0"),
+        ("archived_at", "TEXT"),
+        # Rich Keka Master Fields
+        ("first_name", "TEXT"),
+        ("last_name", "TEXT"),
+        ("display_name", "TEXT"),
+        ("work_email", "TEXT"),
+        ("personal_email", "TEXT"),
+        ("date_of_birth", "TEXT"),
+        ("marital_status", "TEXT"),
+        ("marriage_date", "TEXT"),
+        ("current_address", "TEXT"),
+        ("permanent_address", "TEXT"),
+        ("mother_name", "TEXT"),
+        ("spouse_name", "TEXT"),
+        ("job_title", "TEXT"),
+        ("reporting_to", "TEXT"),
+        ("reporting_manager_emp_no", "TEXT"),
+        ("employment_status", "TEXT"),
+        ("worker_type", "TEXT"),
+        ("time_type", "TEXT"),
+        ("leave_plan", "TEXT"),
+        ("shift_policy", "TEXT"),
+        ("weekly_off_policy", "TEXT"),
+        ("notice_period", "TEXT"),
+        ("pan_number", "TEXT"),
+        ("aadhaar_number", "TEXT"),
+        ("pf_number", "TEXT"),
+        ("uan_number", "TEXT"),
+        ("exit_date", "TEXT"),
+        ("exit_status", "TEXT"),
+        ("termination_type", "TEXT"),
+        ("termination_reason", "TEXT"),
+        ("cost_center", "TEXT"),
+        ("middle_name", "TEXT"),
+        ("blood_group", "TEXT"),
+        ("physically_handicapped", "TEXT"),
+        ("nationality", "TEXT"),
+        ("work_phone", "TEXT"),
+        ("home_phone", "TEXT"),
+        ("children_names", "TEXT"),
+        ("attendance_number", "TEXT"),
+        ("location_country", "TEXT"),
+        ("legal_entity", "TEXT"),
+        ("business_unit", "TEXT"),
+        ("sub_department", "TEXT"),
+        ("secondary_job_title", "TEXT"),
+        ("dotted_line_manager", "TEXT"),
+        ("band", "TEXT"),
+        ("pay_grade", "TEXT"),
+        ("attendance_time_tracking_policy", "TEXT"),
+        ("attendance_capture_scheme", "TEXT"),
+        ("holiday_list_name", "TEXT"),
+        ("expense_policy_name", "TEXT"),
+        ("comments", "TEXT"),
+        ("resignation_note", "TEXT"),
+        ("extension_of_service_till", "TEXT"),
+        ("extension_of_service_months", "TEXT"),
+        ("project_test", "TEXT"),
+    ]
+    for col_name, col_type in new_candidate_columns:
+        if col_name not in existing_cand_cols:
+            cur.execute(f"ALTER TABLE candidates ADD COLUMN {col_name} {col_type}")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -44,14 +129,123 @@ def init_db():
         )
     """)
 
+    # Check if reference_number_config table exists and check its columns for migration
+    cur.execute("PRAGMA table_info(reference_number_config)")
+    columns = [row[1] for row in cur.fetchall()]
+    if columns and "id" in columns:
+        cur.execute("SELECT format_template, padding_width, range_start, range_end, current_number FROM reference_number_config WHERE id = 1")
+        old_data = cur.fetchone()
+        cur.execute("DROP TABLE reference_number_config")
+        cur.execute("""
+            CREATE TABLE reference_number_config (
+                sequence_name TEXT PRIMARY KEY,
+                format_template TEXT,
+                padding_width INTEGER,
+                range_start INTEGER,
+                range_end INTEGER,
+                current_number INTEGER
+            )
+        """)
+        if old_data:
+            cur.execute("""
+                INSERT INTO reference_number_config (sequence_name, format_template, padding_width, range_start, range_end, current_number)
+                VALUES ('hr_reference', ?, ?, ?, ?, ?)
+            """, old_data)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reference_number_config (
+                sequence_name TEXT PRIMARY KEY,
+                format_template TEXT,
+                padding_width INTEGER,
+                range_start INTEGER,
+                range_end INTEGER,
+                current_number INTEGER
+            )
+        """)
+
+    # Template storage table for document generation
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS reference_number_config (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            format_template TEXT,
-            padding_width INTEGER,
-            range_start INTEGER,
-            range_end INTEGER,
-            current_number INTEGER
+        CREATE TABLE IF NOT EXISTS document_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_type TEXT NOT NULL,
+            designation_label TEXT NOT NULL,
+            template_file_path TEXT NOT NULL,
+            created_date TEXT,
+            UNIQUE(document_type, designation_label)
+        )
+    """)
+
+    # Audit trail / history log for document generation events
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS document_generation_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id INTEGER,
+            document_type TEXT,
+            reference_number TEXT,
+            generated_date TEXT,
+            extra_fields_json TEXT,
+            file_path TEXT,
+            generated_by TEXT,
+            FOREIGN KEY (candidate_id) REFERENCES candidates(id)
+        )
+    """)
+
+    # Audit trail / history log for email dispatches
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS email_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id INTEGER,
+            recipient_email TEXT NOT NULL,
+            recipient_name TEXT,
+            document_type TEXT,
+            subject TEXT,
+            attachment_filename TEXT,
+            attachment_path TEXT,
+            sent_by TEXT DEFAULT 'HR Desktop',
+            timestamp TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            FOREIGN KEY (candidate_id) REFERENCES candidates(id)
+        )
+    """)
+
+    # Idempotent column check for email_log
+    cur.execute("PRAGMA table_info(email_log)")
+    existing_email_cols = {row[1] for row in cur.fetchall()}
+    email_cols_to_check = [
+        ("candidate_id", "INTEGER"),
+        ("recipient_email", "TEXT"),
+        ("recipient_name", "TEXT"),
+        ("document_type", "TEXT"),
+        ("subject", "TEXT"),
+        ("attachment_filename", "TEXT"),
+        ("attachment_path", "TEXT"),
+        ("sent_by", "TEXT"),
+        ("timestamp", "TEXT"),
+        ("status", "TEXT"),
+        ("error_message", "TEXT"),
+    ]
+    for col_name, col_type in email_cols_to_check:
+        if col_name not in existing_email_cols:
+            cur.execute(f"ALTER TABLE email_log ADD COLUMN {col_name} {col_type}")
+
+    # Scheduled emails queue
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_emails (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id INTEGER,
+            recipient_email TEXT NOT NULL,
+            recipient_name TEXT,
+            document_type TEXT,
+            subject TEXT NOT NULL,
+            body TEXT NOT NULL,
+            attachment_path TEXT,
+            scheduled_time TEXT NOT NULL,
+            status TEXT DEFAULT 'Scheduled',
+            created_at TEXT NOT NULL,
+            dispatched_at TEXT,
+            error_message TEXT,
+            FOREIGN KEY (candidate_id) REFERENCES candidates(id)
         )
     """)
 
@@ -99,11 +293,13 @@ def upsert_candidate(data: dict, source_sheet_name: str):
     finally:
         conn.close()
 
-def get_all_candidates(search_term="", status_filter="All"):
+def get_all_candidates(search_term="", status_filter="All", include_archived=False):
     conn = get_connection()
     cur = conn.cursor()
     query = "SELECT * FROM candidates WHERE 1=1"
     params = []
+    if not include_archived:
+        query += " AND (archived = 0 OR archived IS NULL)"
     if search_term:
         query += " AND (candidate_name LIKE ? OR contact_location LIKE ? OR applied_designation LIKE ? OR mobile LIKE ?)"
         like = f"%{search_term}%"
@@ -125,11 +321,413 @@ def update_candidate_status(candidate_id: int, status: str):
     conn.commit()
     conn.close()
 
-def delete_candidate(candidate_id: int):
+def update_candidate_extra_details(candidate_id: int, father_name: str, full_address: str, gender: str, department: str, date_joined: str, employee_number: str):
     conn = get_connection()
-    conn.execute("DELETE FROM candidates WHERE id=?", (candidate_id,))
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("""
+        UPDATE candidates
+        SET father_name = ?,
+            full_address = ?,
+            gender = ?,
+            department = ?,
+            date_joined = ?,
+            employee_number = ?,
+            last_updated = ?
+        WHERE id = ?
+    """, (father_name, full_address, gender, department, date_joined, employee_number, now, candidate_id))
     conn.commit()
     conn.close()
+
+def update_candidate_keka_master(candidate_id: int, fields: dict) -> bool:
+    """
+    Updates candidate with non-empty fields from Keka master data.
+    Never overwrites existing database values with blanks or None.
+    """
+    if candidate_id is None or not fields:
+        return False
+    existing = get_candidate_by_id(candidate_id)
+    if not existing:
+        return False
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(candidates)")
+        valid_cols = {row[1] for row in cur.fetchall()}
+
+        update_fields = {}
+        for k, v in fields.items():
+            if k in valid_cols and v is not None and str(v).strip() != "" and str(v).strip().lower() not in ["none", "nan", "null"]:
+                update_fields[k] = str(v).strip()
+
+        if not update_fields:
+            return True
+
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        update_fields["last_updated"] = now
+
+        set_clauses = [f"{col} = ?" for col in update_fields.keys()]
+        values = list(update_fields.values()) + [int(candidate_id)]
+
+        conn.execute(f"UPDATE candidates SET {', '.join(set_clauses)} WHERE id = ?", values)
+        conn.commit()
+        return True
+    except Exception as e:
+        print("update_candidate_keka_master error:", e)
+        return False
+    finally:
+        conn.close()
+
+def insert_keka_employee(fields: dict, source_sheet_name: str = "") -> int | None:
+    """
+    Inserts a newly onboarded employee from Keka master sheet into the candidates table.
+    """
+    if not fields:
+        return None
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(candidates)")
+        valid_cols = {row[1] for row in cur.fetchall()}
+
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        data = {k: str(v).strip() for k, v in fields.items() if k in valid_cols and v is not None and str(v).strip() not in ["", "None", "nan", "null"]}
+        data["source_sheet_name"] = source_sheet_name
+        data["upload_date"] = now
+        data["last_updated"] = now
+        if "status" not in data or not data["status"]:
+            data["status"] = "Joined"
+
+        cols = list(data.keys())
+        placeholders = ["?"] * len(cols)
+        vals = list(data.values())
+
+        cur.execute(f"INSERT INTO candidates ({', '.join(cols)}) VALUES ({', '.join(placeholders)})", vals)
+        new_id = cur.lastrowid
+        conn.commit()
+        return new_id
+    except Exception as e:
+        print("insert_keka_employee error:", e)
+        return None
+    finally:
+        conn.close()
+
+def get_candidate_related_counts(candidate_id: int) -> dict:
+    """
+    Returns counts of linked records in document_generation_log and email_log
+    for a given candidate_id.
+    """
+    if candidate_id is None:
+        return {"documents": 0, "emails": 0}
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM document_generation_log WHERE candidate_id = ?", (int(candidate_id),))
+    doc_count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM email_log WHERE candidate_id = ?", (int(candidate_id),))
+    email_count = cur.fetchone()[0]
+    conn.close()
+    return {"documents": doc_count, "emails": email_count}
+
+def permanently_delete_candidate(candidate_id: int) -> bool:
+    """
+    Permanently deletes a candidate and all their linked records
+    (document_generation_log, email_log) in a single atomic transaction.
+    Returns True if candidate was found and deleted, False otherwise.
+    """
+    if candidate_id is None:
+        return False
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        # Delete dependent rows first to prevent FK constraint failures
+        cur.execute("DELETE FROM document_generation_log WHERE candidate_id = ?", (int(candidate_id),))
+        cur.execute("DELETE FROM email_log WHERE candidate_id = ?", (int(candidate_id),))
+        cur.execute("DELETE FROM scheduled_emails WHERE candidate_id = ?", (int(candidate_id),))
+        cur.execute("DELETE FROM candidates WHERE id = ?", (int(candidate_id),))
+        count = cur.rowcount
+        conn.commit()
+        return count > 0
+    except Exception as e:
+        conn.rollback()
+        print("Permanent delete candidate error:", e)
+        return False
+    finally:
+        conn.close()
+
+def delete_candidate(candidate_id: int) -> bool:
+    """
+    Backward-compatible alias for permanently_delete_candidate.
+    Ensures that existing callers safely delete candidate records
+    and their dependencies in an atomic transaction.
+    """
+    return permanently_delete_candidate(candidate_id)
+
+
+# ================= EMAIL SCHEDULING QUEUE =================
+
+def schedule_email(
+    candidate_id: int,
+    recipient_email: str,
+    recipient_name: str,
+    document_type: str,
+    subject: str,
+    body: str,
+    attachment_path: str,
+    scheduled_time: str
+) -> int | None:
+    """Inserts a scheduled email into scheduled_emails queue. Returns new row ID."""
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO scheduled_emails
+            (candidate_id, recipient_email, recipient_name, document_type,
+             subject, body, attachment_path, scheduled_time, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', ?)
+        """, (
+            candidate_id, recipient_email, recipient_name, document_type,
+            subject, body, attachment_path, scheduled_time, now
+        ))
+        row_id = cur.lastrowid
+        conn.commit()
+        return row_id
+    except Exception as e:
+        print("schedule_email error:", e)
+        return None
+    finally:
+        conn.close()
+
+def get_scheduled_emails(status: str = "Scheduled") -> list[dict]:
+    """Returns scheduled emails filtered by status, or all if status is 'All'."""
+    conn = get_connection()
+    cur = conn.cursor()
+    query = """
+        SELECT id, candidate_id, recipient_email, recipient_name, document_type,
+               subject, body, attachment_path, scheduled_time, status, created_at,
+               dispatched_at, error_message
+        FROM scheduled_emails
+    """
+    params = []
+    if status and status != "All":
+        query += " WHERE status = ?"
+        params.append(status)
+    query += " ORDER BY scheduled_time ASC, id ASC"
+
+    cur.execute(query, params)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+def update_scheduled_email_status(schedule_id: int, status: str, error_message: str = None) -> bool:
+    """Updates status and dispatched_at for a scheduled email."""
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") if status in ["Sent", "Failed"] else None
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE scheduled_emails
+            SET status = ?, dispatched_at = ?, error_message = ?
+            WHERE id = ?
+        """, (status, now, error_message, int(schedule_id)))
+        count = cur.rowcount
+        conn.commit()
+        return count > 0
+    except Exception as e:
+        print("update_scheduled_email_status error:", e)
+        return False
+    finally:
+        conn.close()
+
+def cancel_scheduled_email(schedule_id: int) -> bool:
+    """Cancels a scheduled email if it has not yet been dispatched."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE scheduled_emails SET status = 'Cancelled' WHERE id = ? AND status = 'Scheduled'", (int(schedule_id),))
+        count = cur.rowcount
+        conn.commit()
+        return count > 0
+    except Exception as e:
+        print("cancel_scheduled_email error:", e)
+        return False
+    finally:
+        conn.close()
+
+def archive_candidate(candidate_id: int) -> bool:
+    """
+    Soft-deletes a candidate by setting archived = 1 and archived_at = current timestamp.
+    Preserves all existing data, status, and related rows in document_generation_log / email_log.
+    Returns True if candidate was found and updated, False otherwise.
+    """
+    if candidate_id is None:
+        return False
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE candidates
+            SET archived = 1,
+                archived_at = ?
+            WHERE id = ?
+        """, (now, int(candidate_id)))
+        count = cur.rowcount
+        conn.commit()
+        return count > 0
+    except Exception as e:
+        print("Archive candidate error:", e)
+        return False
+    finally:
+        conn.close()
+
+def restore_candidate(candidate_id: int) -> bool:
+    """
+    Restores an archived candidate by setting archived = 0 and archived_at = NULL.
+    Leaves candidate status and all other fields completely intact.
+    Returns True if candidate was found and restored, False otherwise.
+    """
+    if candidate_id is None:
+        return False
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE candidates
+            SET archived = 0,
+                archived_at = NULL,
+                last_updated = ?
+            WHERE id = ?
+        """, (now, int(candidate_id)))
+        count = cur.rowcount
+        conn.commit()
+        return count > 0
+    except Exception as e:
+        print("Restore candidate error:", e)
+        return False
+    finally:
+        conn.close()
+
+def get_archived_candidates(search_term=""):
+    """
+    Returns only archived candidates (archived = 1), with optional search term.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    query = "SELECT * FROM candidates WHERE archived = 1"
+    params = []
+    if search_term:
+        query += " AND (candidate_name LIKE ? OR contact_location LIKE ? OR applied_designation LIKE ? OR mobile LIKE ?)"
+        like = f"%{search_term}%"
+        params += [like, like, like, like]
+    query += " ORDER BY archived_at DESC, id DESC"
+    cur.execute(query, params)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+def get_candidate_by_id(candidate_id: int) -> dict | None:
+    """Finds a candidate by primary key ID."""
+    if candidate_id is None:
+        return None
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM candidates WHERE id = ?", (int(candidate_id),))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    cols = [d[0] for d in cur.description]
+    res = dict(zip(cols, row))
+    conn.close()
+    return res
+
+def get_candidate_by_mobile(mobile: str) -> dict | None:
+    """Finds a candidate by normalized mobile number."""
+    if not mobile:
+        return None
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM candidates WHERE mobile = ?", (str(mobile).strip(),))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    cols = [d[0] for d in cur.description]
+    res = dict(zip(cols, row))
+    conn.close()
+    return res
+
+def update_employee_lifecycle_data(mobile: str, employee_number: str = None, relieving_date: str = None) -> bool:
+    """
+    Updates employee_number and/or relieving_date for the candidate with the given mobile number.
+    Supports partial updates: only non-None and non-empty values are updated.
+    Empty/blank strings are treated as None to guarantee existing database values are never overwritten.
+    Returns True if candidate was found and updated, False otherwise.
+    """
+    if not mobile:
+        return False
+    clean_mobile = str(mobile).strip()
+
+    updates = []
+    params = []
+
+    # Only update if non-None, non-empty, and not literal 'nan'/'none'/'null'
+    if employee_number is not None:
+        s_emp = str(employee_number).strip()
+        if s_emp and s_emp.lower() not in ["none", "nan", "null"]:
+            updates.append("employee_number = ?")
+            params.append(s_emp)
+
+    if relieving_date is not None:
+        s_rel = str(relieving_date).strip()
+        if s_rel and s_rel.lower() not in ["none", "nan", "null"]:
+            updates.append("relieving_date = ?")
+            params.append(s_rel)
+
+    if not updates:
+        cand = get_candidate_by_mobile(clean_mobile)
+        return cand is not None
+
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    updates.append("last_updated = ?")
+    params.append(now)
+
+    params.append(clean_mobile)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    query = f"UPDATE candidates SET {', '.join(updates)} WHERE mobile = ?"
+    cur.execute(query, params)
+    count = cur.rowcount
+    conn.commit()
+    conn.close()
+    return count > 0
+
+def get_candidates_pending_keka_sync() -> list[dict]:
+    """
+    Returns candidates whose status is 'Joined' but employee_number is still empty or NULL.
+    Used to track employees pending Keka HRMS sync.
+    Excludes archived candidates.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    query = """
+        SELECT * FROM candidates
+        WHERE status = 'Joined'
+          AND (archived = 0 OR archived IS NULL)
+          AND (employee_number IS NULL OR TRIM(employee_number) = '')
+        ORDER BY id DESC
+    """
+    cur.execute(query)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
 
 def save_api_key(key_id: str, provider: str, api_key: str):
@@ -174,10 +772,10 @@ def delete_api_key(key_id: str):
     conn.close()
 
 
-def save_reference_config(format_template: str, padding_width: int, range_start: int, range_end: int):
+def save_reference_config(sequence_name: str, format_template: str, padding_width: int, range_start: int, range_end: int):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT range_start, current_number FROM reference_number_config WHERE id = 1")
+    cur.execute("SELECT range_start, current_number FROM reference_number_config WHERE sequence_name = ?", (sequence_name,))
     existing = cur.fetchone()
 
     if existing and existing[0] == range_start:
@@ -186,27 +784,28 @@ def save_reference_config(format_template: str, padding_width: int, range_start:
         current_num = range_start
 
     conn.execute("""
-        INSERT INTO reference_number_config (id, format_template, padding_width, range_start, range_end, current_number)
-        VALUES (1, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
+        INSERT INTO reference_number_config (sequence_name, format_template, padding_width, range_start, range_end, current_number)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(sequence_name) DO UPDATE SET
             format_template=excluded.format_template,
             padding_width=excluded.padding_width,
             range_start=excluded.range_start,
             range_end=excluded.range_end,
             current_number=excluded.current_number
-    """, (format_template, padding_width, range_start, range_end, current_num))
+    """, (sequence_name, format_template, padding_width, range_start, range_end, current_num))
     conn.commit()
     conn.close()
 
-def get_reference_config():
+def get_reference_config(sequence_name: str = "hr_reference"):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT format_template, padding_width, range_start, range_end, current_number FROM reference_number_config WHERE id=1")
+    cur.execute("SELECT format_template, padding_width, range_start, range_end, current_number FROM reference_number_config WHERE sequence_name = ?", (sequence_name,))
     row = cur.fetchone()
     conn.close()
     if not row:
         return None
     return {
+        "sequence_name": sequence_name,
         "format_template": row[0],
         "padding_width": row[1],
         "range_start": row[2],
@@ -214,9 +813,9 @@ def get_reference_config():
         "current_number": row[4]
     }
 
-def preview_next_reference():
+def preview_next_reference(sequence_name: str = "hr_reference"):
     from services.reference_number_service import format_reference_number
-    config = get_reference_config()
+    config = get_reference_config(sequence_name)
     if not config:
         return None
     if config["current_number"] > config["range_end"]:
@@ -226,16 +825,293 @@ def preview_next_reference():
     total = config["range_end"] - config["range_start"] + 1
     return {"exhausted": False, "formatted": formatted, "remaining": remaining, "total": total}
 
-def consume_next_reference():
-    config = get_reference_config()
+def consume_next_reference(sequence_name: str = "hr_reference"):
+    config = get_reference_config(sequence_name)
     if not config:
-        return None, "No reference number configuration found. Please set it up in Settings."
+        return None, f"No reference number configuration found for '{sequence_name}'. Please set it up in Settings."
     if config["current_number"] > config["range_end"]:
-        return None, "Reference number range exhausted. Please add a new range in Settings."
+        return None, f"Reference number range exhausted for '{sequence_name}'. Please add a new range in Settings."
     from services.reference_number_service import format_reference_number
     formatted = format_reference_number(config["format_template"], config["padding_width"], config["current_number"])
     conn = get_connection()
-    conn.execute("UPDATE reference_number_config SET current_number = current_number + 1 WHERE id=1")
+    conn.execute("UPDATE reference_number_config SET current_number = current_number + 1 WHERE sequence_name = ?", (sequence_name,))
     conn.commit()
     conn.close()
     return formatted, None
+
+
+# ================= DOCUMENT TEMPLATES =================
+
+def resolve_template_path(relative_path: str) -> str:
+    """
+    Resolves a template path stored in the database (which may be stored as a relative path
+    like 'templates/offer/xxx.docx') into an absolute path anchored to TEMPLATES_DIR,
+    regardless of the current working directory the app is launched from.
+    """
+    from config import TEMPLATES_DIR
+    import os
+    # Strip any leading 'templates/' or 'templates\' prefix from the stored relative path
+    # since TEMPLATES_DIR already points to the templates folder itself
+    normalized = relative_path.replace("\\", "/")
+    if normalized.startswith("templates/"):
+        normalized = normalized[len("templates/"):]
+    return os.path.normpath(os.path.join(TEMPLATES_DIR, normalized))
+
+def add_document_template(document_type: str, designation_label: str, template_file_path: str) -> bool:
+    """Inserts a new mapping, returns False if duplicate or fails."""
+    conn = get_connection()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn.execute("""
+            INSERT INTO document_templates (document_type, designation_label, template_file_path, created_date)
+            VALUES (?, ?, ?, ?)
+        """, (document_type, designation_label, template_file_path, now))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        print(f"Template mapping already exists: ({document_type}, '{designation_label}')")
+        return False
+    except Exception as e:
+        print(f"Error adding document template: {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_templates_by_type(document_type: str) -> list[dict]:
+    """Returns all templates for a given document type."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, designation_label, template_file_path
+        FROM document_templates
+        WHERE document_type = ?
+        ORDER BY designation_label ASC
+    """, (document_type,))
+    rows = cur.fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "designation_label": r[1], "template_file_path": r[2]}
+        for r in rows
+    ]
+
+def get_template_path(document_type: str, designation_label: str):
+    """Returns the template file path for a specific type and designation, or None."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT template_file_path
+        FROM document_templates
+        WHERE document_type = ? AND designation_label = ?
+    """, (document_type, designation_label))
+    row = cur.fetchone()
+    conn.close()
+    if row:
+        return resolve_template_path(row[0])
+    return None
+
+def delete_document_template(template_id: int):
+    """Deletes a template mapping from the database by id."""
+    conn = get_connection()
+    conn.execute("DELETE FROM document_templates WHERE id = ?", (template_id,))
+    conn.commit()
+    conn.close()
+
+def get_all_document_templates() -> list[dict]:
+    """Returns all document templates across all types."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, document_type, designation_label, template_file_path, created_date
+        FROM document_templates
+        ORDER BY document_type ASC, designation_label ASC
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0],
+            "document_type": r[1],
+            "designation_label": r[2],
+            "template_file_path": r[3],
+            "created_date": r[4]
+        }
+        for r in rows
+    ]
+
+
+# ================= DOCUMENT GENERATION AUDIT LOG =================
+
+def log_document_generation(candidate_id: int, document_type: str, reference_number: str,
+                            extra_fields_dict: dict, file_path: str, generated_by: str = None) -> int:
+    """
+    Logs a document generation event into document_generation_log.
+    extra_fields_dict is serialized to JSON string.
+    Returns the newly inserted log record ID.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    extra_json = json.dumps(extra_fields_dict or {})
+    cur.execute("""
+        INSERT INTO document_generation_log
+        (candidate_id, document_type, reference_number, generated_date, extra_fields_json, file_path, generated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (candidate_id, document_type, reference_number, now, extra_json, file_path, generated_by))
+    log_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return log_id
+
+def get_generation_history(candidate_id: int) -> list[dict]:
+    """
+    Returns all generation records for a given candidate, ordered by generated_date DESC.
+    extra_fields_json is deserialized back into a python dict.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, candidate_id, document_type, reference_number, generated_date, extra_fields_json, file_path, generated_by
+        FROM document_generation_log
+        WHERE candidate_id = ?
+        ORDER BY generated_date DESC
+    """, (candidate_id,))
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        try:
+            extra_fields = json.loads(r[5]) if r[5] else {}
+        except Exception:
+            extra_fields = {}
+        result.append({
+            "id": r[0],
+            "candidate_id": r[1],
+            "document_type": r[2],
+            "reference_number": r[3],
+            "generated_date": r[4],
+            "extra_fields": extra_fields,
+            "file_path": r[6],
+            "generated_by": r[7]
+        })
+    return result
+
+def get_all_generation_logs() -> list[dict]:
+    """
+    Returns all document generation records in the system, ordered by generated_date DESC.
+    extra_fields_json is deserialized back into a python dict.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, candidate_id, document_type, reference_number, generated_date, extra_fields_json, file_path, generated_by
+        FROM document_generation_log
+        ORDER BY generated_date DESC
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        try:
+            extra_fields = json.loads(r[5]) if r[5] else {}
+        except Exception:
+            extra_fields = {}
+        result.append({
+            "id": r[0],
+            "candidate_id": r[1],
+            "document_type": r[2],
+            "reference_number": r[3],
+            "generated_date": r[4],
+            "extra_fields": extra_fields,
+            "file_path": r[6],
+            "generated_by": r[7]
+        })
+    return result
+
+
+def log_email_dispatch(
+    recipient_email: str,
+    recipient_name: str = None,
+    document_type: str = None,
+    subject: str = None,
+    attachment_filename: str = None,
+    attachment_path: str = None,
+    sent_by: str = "HR Desktop",
+    status: str = "Success",
+    error_message: str = None,
+    candidate_id: int = None
+) -> int:
+    """Records an email dispatch event into email_log. Returns log row ID."""
+    conn = get_connection()
+    cur = conn.cursor()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cur.execute("""
+        INSERT INTO email_log
+        (candidate_id, recipient_email, recipient_name, document_type, subject,
+         attachment_filename, attachment_path, sent_by, timestamp, status, error_message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        candidate_id,
+        recipient_email,
+        recipient_name,
+        document_type,
+        subject,
+        attachment_filename,
+        attachment_path,
+        sent_by,
+        now,
+        status,
+        error_message
+    ))
+    log_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return log_id
+
+
+def get_email_logs(candidate_id: int = None, limit: int = 200) -> list:
+    """
+    Returns list of email dispatch logs ordered newest first.
+    Optionally filtered by candidate_id.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    if candidate_id:
+        cur.execute("""
+            SELECT id, candidate_id, recipient_email, recipient_name, document_type,
+                   subject, attachment_filename, attachment_path, sent_by, timestamp,
+                   status, error_message
+            FROM email_log
+            WHERE candidate_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        """, (candidate_id, limit))
+    else:
+        cur.execute("""
+            SELECT id, candidate_id, recipient_email, recipient_name, document_type,
+                   subject, attachment_filename, attachment_path, sent_by, timestamp,
+                   status, error_message
+            FROM email_log
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,))
+
+    rows = cur.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0],
+            "candidate_id": r[1],
+            "recipient_email": r[2],
+            "recipient_name": r[3],
+            "document_type": r[4],
+            "subject": r[5],
+            "attachment_filename": r[6],
+            "attachment_path": r[7],
+            "sent_by": r[8],
+            "timestamp": r[9],
+            "status": r[10],
+            "error_message": r[11],
+        }
+        for r in rows
+    ]
+

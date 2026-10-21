@@ -9,7 +9,7 @@ SECRET_KEY_PATH = os.path.join(DATABASE_DIR, "secret.key")
 GMAIL_TOKEN_PATH = os.path.join(DATABASE_DIR, "gmail_token.pickle")
 
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+TEMPLATES_DIR = os.path.join(DESKTOP_APP_DIR, "templates")
 
 os.makedirs(DATABASE_DIR, exist_ok=True)
 
