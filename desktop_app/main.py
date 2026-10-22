@@ -92,7 +92,8 @@ def main(page: ft.Page):
         elif index == 4:
             content_area.content = settings_view(page)
         elif index == 5:
-            content_area.content = help_center_view(page, on_navigate=navigate_to)
+            initial_tab = kwargs.get("tab") if "tab" in kwargs else kwargs.get("initial_tab", 0)
+            content_area.content = help_center_view(page, on_navigate=navigate_to, initial_tab=int(initial_tab or 0))
         page.update()
 
     page.on_navigate = navigate_to
