@@ -676,6 +676,160 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         select_all_checkbox.value = len(displayed) > 0 and all(c["id"] in selected_candidate_ids for c in displayed)
         page.update()
 
+    # ---------------- Edit Candidate Profile Modal ----------------
+    def show_edit_candidate_modal(cand_item: dict):
+        cand_id = cand_item["id"]
+        fresh_cand = db_manager.get_candidate_by_id(cand_id) or cand_item
+
+        c_name = fresh_cand.get("candidate_name") or ""
+        name_field = ft.TextField(
+            label="Candidate Full Name",
+            value=c_name,
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        mob_field = ft.TextField(
+            label="Mobile Number (10 digits)",
+            value=str(fresh_cand.get("mobile") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        email_field = ft.TextField(
+            label="Email Address",
+            value=str(fresh_cand.get("email") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        desig_field = ft.TextField(
+            label="Applied Designation / Role",
+            value=str(fresh_cand.get("applied_designation") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        salary_field = ft.TextField(
+            label="Monthly Salary (₹)",
+            value=str(fresh_cand.get("negotiated_salary") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        dept_field = ft.TextField(
+            label="Department",
+            value=str(fresh_cand.get("department") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        addr_field = ft.TextField(
+            label="Full Address / Location",
+            value=str(fresh_cand.get("full_address") or fresh_cand.get("contact_location") or ""),
+            multiline=True,
+            min_lines=2,
+            max_lines=3,
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+        )
+        date_joined_field = ft.TextField(
+            label="Date Joined (YYYY-MM-DD)",
+            value=str(fresh_cand.get("date_joined") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        curr_status = fresh_cand.get("status") or "Applied"
+        status_field = ft.Dropdown(
+            label="Pipeline Status",
+            value=curr_status if curr_status in STATUS_OPTIONS else "Applied",
+            options=[ft.dropdown.Option(opt) for opt in STATUS_OPTIONS],
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+
+        def on_save_candidate_details(e):
+            n_val = (name_field.value or "").strip()
+            m_val = (mob_field.value or "").strip()
+            em_val = (email_field.value or "").strip()
+            des_val = (desig_field.value or "").strip()
+            sal_val = (salary_field.value or "").strip()
+            dep_val = (dept_field.value or "").strip()
+            addr_val = (addr_field.value or "").strip()
+            dj_val = (date_joined_field.value or "").strip()
+            st_val = status_field.value
+
+            if not n_val:
+                show_message("Candidate name cannot be empty.", False)
+                return
+
+            update_data = {
+                "candidate_name": n_val,
+                "mobile": m_val,
+                "email": em_val,
+                "applied_designation": des_val,
+                "department": dep_val,
+                "full_address": addr_val,
+                "contact_location": addr_val,
+                "date_joined": dj_val,
+                "status": st_val,
+            }
+            if sal_val:
+                try:
+                    update_data["negotiated_salary"] = float(sal_val)
+                except ValueError:
+                    pass
+
+            ok = db_manager.update_candidate(cand_id, update_data)
+            page.close(dlg)
+            if ok:
+                show_message(f"Candidate details for '{n_val}' updated successfully!", True)
+                refresh_candidates(reset_page=False)
+            else:
+                show_message("Failed to update candidate details.", False)
+            page.update()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Row([
+                ft.Icon(ft.Icons.EDIT_NOTE_ROUNDED, color=COLOR_PRIMARY_LIGHT, size=24),
+                ft.Text(f"Edit Candidate Profile (#{cand_id})", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY, size=17),
+            ], spacing=8),
+            content=ft.Container(
+                width=580,
+                content=ft.Column([
+                    ft.Text(
+                        "Updating these details updates the candidate database record across the pipeline and document generator.",
+                        size=12, color=COLOR_TEXT_SECONDARY
+                    ),
+                    ft.Divider(height=10, color=COLOR_CARD_BORDER),
+                    ft.Row([name_field, desig_field], spacing=10),
+                    ft.Row([email_field, mob_field], spacing=10),
+                    ft.Row([dept_field, salary_field], spacing=10),
+                    addr_field,
+                    ft.Row([date_joined_field, status_field], spacing=10),
+                ], spacing=10, tight=True, scroll=ft.ScrollMode.AUTO),
+            ),
+            actions=[
+                secondary_button("Cancel", on_click=lambda ev: page.close(dlg)),
+                primary_button("Save & Update", icon=ft.Icons.SAVE_OUTLINED, on_click=on_save_candidate_details),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.open(dlg)
+        page.update()
+
     # ---------------- Inline Status Change Handler ----------------
     def make_status_change(cand_id: int, cand_name: str):
         def on_change(e):
@@ -1007,7 +1161,17 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                         on_change=make_tag_change_handler(),
                     )
 
-                    action_buttons = ft.Row([whatsapp_btn, email_action_btn, slip_btn, archive_btn], spacing=2)
+                    def make_edit_handler(cand_item=c):
+                        return lambda e: show_edit_candidate_modal(cand_item)
+
+                    edit_btn = ft.IconButton(
+                        icon=ft.Icons.EDIT_OUTLINED,
+                        icon_color=COLOR_PRIMARY_LIGHT,
+                        tooltip="Edit Candidate Details (Fix Missing Fields)",
+                        on_click=make_edit_handler(),
+                    )
+
+                    action_buttons = ft.Row([edit_btn, whatsapp_btn, email_action_btn, slip_btn, archive_btn], spacing=2)
 
                     rows.append(
                         ft.DataRow(cells=[

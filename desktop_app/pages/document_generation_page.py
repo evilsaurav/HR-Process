@@ -414,6 +414,151 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
             or kw in str(r.get("suggested_doc_type") or "").lower()
         ]
 
+    def open_edit_candidate_modal(candidate_id: int):
+        cand = db_manager.get_candidate_by_id(candidate_id)
+        if not cand:
+            show_message("Candidate record not found.", False)
+            return
+
+        c_name = cand.get("candidate_name") or ""
+        name_field = ft.TextField(
+            label="Candidate Full Name",
+            value=c_name,
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        mob_field = ft.TextField(
+            label="Mobile Number (10 digits)",
+            value=str(cand.get("mobile") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        email_field = ft.TextField(
+            label="Email Address",
+            value=str(cand.get("email") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        desig_field = ft.TextField(
+            label="Applied Designation / Role",
+            value=str(cand.get("applied_designation") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        salary_field = ft.TextField(
+            label="Monthly Salary (₹)",
+            value=str(cand.get("negotiated_salary") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        dept_field = ft.TextField(
+            label="Department",
+            value=str(cand.get("department") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+        addr_field = ft.TextField(
+            label="Full Address / Location",
+            value=str(cand.get("full_address") or cand.get("contact_location") or ""),
+            multiline=True,
+            min_lines=2,
+            max_lines=3,
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+        )
+        date_joined_field = ft.TextField(
+            label="Date Joined (YYYY-MM-DD)",
+            value=str(cand.get("date_joined") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
+
+        def on_save_candidate_details(e):
+            n_val = (name_field.value or "").strip()
+            m_val = (mob_field.value or "").strip()
+            em_val = (email_field.value or "").strip()
+            des_val = (desig_field.value or "").strip()
+            sal_val = (salary_field.value or "").strip()
+            dep_val = (dept_field.value or "").strip()
+            addr_val = (addr_field.value or "").strip()
+            dj_val = (date_joined_field.value or "").strip()
+
+            if not n_val:
+                show_message("Candidate name cannot be empty.", False)
+                return
+
+            update_data = {
+                "candidate_name": n_val,
+                "mobile": m_val,
+                "email": em_val,
+                "applied_designation": des_val,
+                "department": dep_val,
+                "full_address": addr_val,
+                "contact_location": addr_val,
+                "date_joined": dj_val,
+            }
+            if sal_val:
+                try:
+                    update_data["negotiated_salary"] = float(sal_val)
+                except ValueError:
+                    pass
+
+            ok = db_manager.update_candidate(candidate_id, update_data)
+            page.close(dlg)
+            if ok:
+                show_message(f"Candidate details for '{n_val}' updated successfully!", True)
+                refresh_detection_table()
+                refresh_staging_table()
+            else:
+                show_message("Failed to update candidate details.", False)
+            page.update()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Row([
+                ft.Icon(ft.Icons.EDIT_NOTE_ROUNDED, color=COLOR_PRIMARY_LIGHT, size=24),
+                ft.Text(f"Edit Candidate Profile (#{candidate_id})", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY, size=17),
+            ], spacing=8),
+            content=ft.Container(
+                width=580,
+                content=ft.Column([
+                    ft.Text(
+                        "Updating these details updates the candidate database record and immediately resolves missing field warnings.",
+                        size=12, color=COLOR_TEXT_SECONDARY
+                    ),
+                    ft.Divider(height=10, color=COLOR_CARD_BORDER),
+                    ft.Row([name_field, desig_field], spacing=10),
+                    ft.Row([email_field, mob_field], spacing=10),
+                    ft.Row([dept_field, salary_field], spacing=10),
+                    addr_field,
+                    ft.Row([date_joined_field], spacing=10),
+                ], spacing=10, tight=True, scroll=ft.ScrollMode.AUTO),
+            ),
+            actions=[
+                secondary_button("Cancel", on_click=lambda ev: page.close(dlg)),
+                primary_button("Save & Update", icon=ft.Icons.SAVE_OUTLINED, on_click=on_save_candidate_details),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.open(dlg)
+        page.update()
+        return dlg
+
     def render_detection_table():
         filtered = get_filtered_detection_records()
         if not filtered:
@@ -530,6 +675,18 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
                 on_click=make_single_stage_handler(),
             )
 
+            def make_edit_candidate_handler(c_id=cid):
+                return lambda e: open_edit_candidate_modal(c_id)
+
+            edit_candidate_btn = ft.IconButton(
+                icon=ft.Icons.EDIT_OUTLINED,
+                icon_color=COLOR_WARNING,
+                tooltip="Edit Candidate Details (Fix Missing Fields)",
+                on_click=make_edit_candidate_handler(),
+            )
+
+            action_row = ft.Row([single_stage_btn, edit_candidate_btn], spacing=2)
+
             rows.append(ft.DataRow(cells=[
                 ft.DataCell(chk),
                 ft.DataCell(name_cell),
@@ -537,7 +694,7 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
                 ft.DataCell(badge_cell),
                 ft.DataCell(override_dropdown),
                 ft.DataCell(health_cell),
-                ft.DataCell(single_stage_btn),
+                ft.DataCell(action_row),
             ]))
 
         if filtered and all(r["candidate_id"] in state["selected_detected_ids"] for r in filtered):
@@ -1013,6 +1170,7 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
         )
         page.open(dlg)
         page.update()
+        return dlg
 
     def open_fix_details_modal(staging_id: int):
         staging_rec = db_manager.get_staging_record_by_id(staging_id)
@@ -1082,6 +1240,14 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
             focused_border_color=COLOR_PRIMARY_LIGHT,
             expand=True,
         )
+        mobile_field = ft.TextField(
+            label="Candidate Mobile Number (10 digits)",
+            value=str(candidate.get("mobile") or ""),
+            border_radius=8,
+            border_color=COLOR_CARD_BORDER,
+            focused_border_color=COLOR_PRIMARY_LIGHT,
+            expand=True,
+        )
 
         def on_save_fix(e):
             c_name_val = (name_field.value or "").strip()
@@ -1089,6 +1255,7 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
             c_dept_val = (dept_field.value or "").strip()
             c_loc_val = (loc_field.value or "").strip()
             c_email_val = (email_field.value or "").strip()
+            c_mob_val = (mobile_field.value or "").strip()
             c_sal_val = (salary_field.value or "").strip()
             c_rel_val = (relieving_field.value or "").strip()
 
@@ -1098,6 +1265,7 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
                 "department": c_dept_val,
                 "full_address": c_loc_val,
                 "email": c_email_val,
+                "mobile": c_mob_val,
             }
             if c_sal_val:
                 try:
@@ -1144,8 +1312,9 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
                     ft.Divider(height=10, color=COLOR_CARD_BORDER),
                     ft.Row([name_field, email_field], spacing=10),
                     ft.Row([desig_field, dept_field], spacing=10),
+                    ft.Row([mobile_field, salary_field], spacing=10),
                     loc_field,
-                    ft.Row([salary_field, relieving_field], spacing=10),
+                    ft.Row([relieving_field], spacing=10),
                 ], spacing=10, tight=True, scroll=ft.ScrollMode.AUTO),
             ),
             actions=[
@@ -2155,6 +2324,7 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
     view_column.btn_rescan_detector = btn_rescan_detector
     view_column.btn_refresh_staging = btn_refresh_staging
     view_column.open_fix_details_modal = open_fix_details_modal
+    view_column.open_edit_candidate_modal = open_edit_candidate_modal
     view_column.open_final_go_confirmation = open_final_go_confirmation
     view_column.tab1_container = tab1_container
     view_column.tab2_container = tab2_container

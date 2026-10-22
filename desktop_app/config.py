@@ -36,7 +36,7 @@ REQUIRED_CANDIDATE_COLUMNS = [
     "Key Responsibilities", "Contact Location"
 ]
 
-STATUS_OPTIONS = ["Applied", "Shortlisted", "Interview", "Offer Sent", "Joined", "Rejected"]
+STATUS_OPTIONS = ["Applied", "Shortlisted", "Interview", "Selected", "Offer Sent", "Joined", "Rejected"]
 
 AI_PROVIDERS = ["Gemini", "Groq", "NVIDIA", "OpenRouter", "Together AI", "Unknown"]
 
