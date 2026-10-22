@@ -37,6 +37,7 @@ desktop_app/database/*.db
 # Ignore all legacy root items, keep only desktop_app, .gitignore, and launchers
 /*
 !/desktop_app/
+!/docs/
 !/.gitignore
 !/Launch_DFY_HRMS.bat
 !/Install_Dependencies.bat
