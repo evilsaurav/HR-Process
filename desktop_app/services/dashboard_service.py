@@ -363,3 +363,57 @@ def get_dashboard_stats() -> Dict[str, Any]:
         "increment_due_count": increment_due_count,
         "keka_pending_count": keka_pending_count,
     }
+
+
+def get_department_breakdown() -> Dict[str, Any]:
+    """
+    Returns candidate metrics grouped by department / source sheet (e.g. PPSA UP, Bihar, Maharashtra).
+    """
+    conn = db_manager.get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT 
+            COALESCE(NULLIF(department, ''), NULLIF(source_sheet_name, ''), 'General / Unassigned') as dept_name,
+            COUNT(*) as total_count,
+            SUM(CASE WHEN status = 'Selected' THEN 1 ELSE 0 END) as sel_count,
+            SUM(CASE WHEN status = 'Joined' THEN 1 ELSE 0 END) as join_count,
+            SUM(CASE WHEN status = 'Interview' THEN 1 ELSE 0 END) as int_count
+        FROM candidates
+        WHERE (archived = 0 OR archived IS NULL)
+        GROUP BY dept_name
+        ORDER BY total_count DESC
+    """)
+    rows = cur.fetchall()
+    conn.close()
+
+    result = {}
+    for r in rows:
+        dname = str(r[0]).strip()
+        tot = r[1] or 0
+        sel = r[2] or 0
+        joined = r[3] or 0
+        interview = r[4] or 0
+        result[dname] = {
+            "total": tot,
+            "selected": sel,
+            "joined": joined,
+            "interview": interview,
+            "in_pipeline": tot - joined
+        }
+    return result
+
+
+def get_pipeline_funnel_summary() -> Dict[str, int]:
+    """
+    Returns sequential funnel stage counts for quick executive overview.
+    """
+    overview = get_status_overview()
+    return {
+        "Applied": overview.get("Applied", 0),
+        "Interview": overview.get("Interview", 0),
+        "Selected": overview.get("Selected", 0),
+        "Offer Sent": overview.get("Offer Sent", 0),
+        "Joined": overview.get("Joined", 0),
+        "Rejected": overview.get("Rejected", 0),
+        "total": overview.get("total", 0),
+    }
