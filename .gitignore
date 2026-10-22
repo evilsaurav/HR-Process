@@ -33,3 +33,6 @@ token.json
 !/desktop_app/
 !/.gitignore
 !/Launch_DFY_HRMS.bat
+!/Install_Dependencies.bat
+!/README.md
+!/requirements.txt

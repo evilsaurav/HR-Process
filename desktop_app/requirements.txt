@@ -1,9 +1,24 @@
+# Doctors For You (DFY) HR Operations Platform
+# Core UI and Framework
 flet>=0.24.1
-pandas
-openpyxl
-cryptography
-google-generativeai
-requests
-google-auth
-google-auth-oauthlib
-google-api-python-client
+
+# Excel & Data Processing
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Document Generation & Word Automation
+python-docx>=1.0.0
+num2words>=0.5.12
+pywin32>=306
+
+# Security & Encryption
+cryptography>=41.0.0
+
+# Network & AI Services
+requests>=2.28.0
+google-generativeai>=0.3.0
+
+# Optional Google Workspace / OAuth Integration
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0
