@@ -118,6 +118,9 @@ def format_date_long(date_value: Any, fallback: str = "") -> str:
     if not s or s.lower() in ["none", "nan", "nat", "null"]:
         return fallback
 
+    # Clean any timestamp fragments (e.g. ' 00:00:00', 'T00:00:00', etc.)
+    s_cleaned = re.sub(r'[T\s]+\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?.*$', '', s).strip()
+
     # Try explicit common date formats
     common_formats = [
         "%Y-%m-%d",
@@ -127,20 +130,20 @@ def format_date_long(date_value: Any, fallback: str = "") -> str:
         "%Y/%m/%d",
         "%d %B %Y",
         "%d %b %Y",
-        "%Y-%m-%d %H:%M:%S",
         "%d.%m.%Y",
     ]
-    for fmt in common_formats:
-        try:
-            dt = datetime.datetime.strptime(s, fmt)
-            return dt.strftime("%d %B %Y")
-        except ValueError:
-            pass
+    for target_str in ([s_cleaned, s] if s_cleaned != s else [s_cleaned]):
+        for fmt in common_formats:
+            try:
+                dt = datetime.datetime.strptime(target_str, fmt)
+                return dt.strftime("%d %B %Y")
+            except ValueError:
+                pass
 
     # Optional pandas parsing fallback for any irregular strings
     try:
         import pandas as pd
-        parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
+        parsed = pd.to_datetime(s_cleaned, errors="coerce", dayfirst=True)
         if parsed is not pd.NaT and not pd.isna(parsed):
             return parsed.strftime("%d %B %Y")
     except Exception:
@@ -164,21 +167,26 @@ def calculate_end_date(start_date_str: Any, years: int = 1) -> str:
         dt = start_date_str
     else:
         s = str(start_date_str).strip()
+        # Clean any timestamp fragments
+        s_cleaned = re.sub(r'[T\s]+\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?.*$', '', s).strip()
         common_formats = [
             "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y",
-            "%Y/%m/%d", "%d %B %Y", "%d %b %Y"
+            "%Y/%m/%d", "%d %B %Y", "%d %b %Y", "%d.%m.%Y"
         ]
-        for fmt in common_formats:
-            try:
-                dt = datetime.datetime.strptime(s, fmt)
+        for target_str in ([s_cleaned, s] if s_cleaned != s else [s_cleaned]):
+            for fmt in common_formats:
+                try:
+                    dt = datetime.datetime.strptime(target_str, fmt)
+                    break
+                except ValueError:
+                    pass
+            if dt is not None:
                 break
-            except ValueError:
-                pass
 
         if dt is None:
             try:
                 import pandas as pd
-                parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
+                parsed = pd.to_datetime(s_cleaned, errors="coerce", dayfirst=True)
                 if parsed is not pd.NaT and not pd.isna(parsed):
                     dt = parsed.to_pydatetime()
             except Exception:

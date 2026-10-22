@@ -11,8 +11,9 @@ import re
 import datetime
 import docx
 from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
-from docx.shared import Pt
+from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from typing import Dict, Any, Optional, List
 
@@ -497,34 +498,76 @@ def resolve_template(document_type: str, candidate: dict, manual_designation_ove
 
 def insert_reference_and_date(doc, reference_number: str, date_text: str, document_type: str) -> None:
     """
-    Inserts Reference Number and Dated line after the anchor paragraph (doc.paragraphs[0]).
-    - Offer, extension, increment, termination: 81 spaces, bold, Times New Roman, 11pt, 'Dated: ...'
-    - Experience, salary: 69 spaces, bold, Times New Roman, 12pt, 'Date: ...'
+    Inserts Reference Number and Dated line after the anchor paragraph (doc.paragraphs[0])
+    using a 1-row, 2-column borderless Word table for robust, margin-aligned layout:
+    - Left Cell: Reference No: <clean_ref> (Left aligned)
+    - Right Cell: Dated: <clean_date> or Date: <clean_date> (Right aligned)
+    - Font: Times New Roman, Bold, 11pt (12pt for Experience/Salary Certificates)
     """
     if not doc or not doc.paragraphs:
         return
 
     doc_type_lower = (document_type or "").strip().lower()
-    first_para_element = doc.paragraphs[0]._element
-    p_element = OxmlElement("w:p")
-    first_para_element.addnext(p_element)
-    p = Paragraph(p_element, doc.paragraphs[0]._parent)
-
     clean_ref = str(reference_number).strip() if reference_number else ""
     clean_date = str(date_text).strip() if date_text else ""
 
     if doc_type_lower in ["experience", "experience_certificate", "salary", "salary_certificate"]:
-        text = f"Reference No: {clean_ref}" + (" " * 69) + f"Date: {clean_date}"
-        run = p.add_run(text)
-        run.font.name = "Times New Roman"
-        run.font.size = Pt(12)
-        run.bold = True
+        date_label = "Date"
+        font_size = 12
     else:
-        text = f"Reference No: {clean_ref}" + (" " * 81) + f"Dated: {clean_date}"
-        run = p.add_run(text)
-        run.font.name = "Times New Roman"
-        run.font.size = Pt(11)
-        run.bold = True
+        date_label = "Dated"
+        font_size = 11
+
+    # Create 1-row, 2-column table
+    table = doc.add_table(rows=1, cols=2)
+    table.autofit = False
+
+    # Move table XML element directly after doc.paragraphs[0]._element
+    doc.paragraphs[0]._element.addnext(table._element)
+
+    # Set column widths: Column 0 = Inches(3.6), Column 1 = Inches(2.9)
+    table.columns[0].width = Inches(3.6)
+    table.columns[1].width = Inches(2.9)
+
+    # Set explicit cell widths
+    cell_0 = table.cell(0, 0)
+    cell_1 = table.cell(0, 1)
+    cell_0.width = Inches(3.6)
+    cell_1.width = Inches(2.9)
+
+    # Remove all borders
+    tblPr = table._element.xpath('w:tblPr')
+    if tblPr:
+        for existing_borders in tblPr[0].findall(qn('w:tblBorders')):
+            tblPr[0].remove(existing_borders)
+        tblBorders = OxmlElement('w:tblBorders')
+        for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+            border = OxmlElement(f'w:{border_name}')
+            border.set(qn('w:val'), 'none')
+            tblBorders.append(border)
+        tblPr[0].append(tblBorders)
+
+    # Left cell: Reference No
+    p_0 = cell_0.paragraphs[0]
+    p_0.text = ""
+    p_0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p_0.paragraph_format.space_before = Pt(0)
+    p_0.paragraph_format.space_after = Pt(0)
+    run_0 = p_0.add_run(f"Reference No: {clean_ref}")
+    run_0.font.name = "Times New Roman"
+    run_0.font.size = Pt(font_size)
+    run_0.bold = True
+
+    # Right cell: Dated / Date
+    p_1 = cell_1.paragraphs[0]
+    p_1.text = ""
+    p_1.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p_1.paragraph_format.space_before = Pt(0)
+    p_1.paragraph_format.space_after = Pt(0)
+    run_1 = p_1.add_run(f"{date_label}: {clean_date}")
+    run_1.font.name = "Times New Roman"
+    run_1.font.size = Pt(font_size)
+    run_1.bold = True
 
 
 def inject_certificate_paragraphs(doc, mapping: dict, document_type: str) -> None:
