@@ -43,7 +43,8 @@ def init_db():
             archived INTEGER DEFAULT 0,
             archived_at TEXT,
             welcome_email_sent INTEGER DEFAULT 0,
-            welcome_email_sent_at TEXT
+            welcome_email_sent_at TEXT,
+            tag TEXT
         )
     """)
 
@@ -60,6 +61,7 @@ def init_db():
         ("relieving_date", "TEXT"),
         ("archived", "INTEGER DEFAULT 0"),
         ("archived_at", "TEXT"),
+        ("tag", "TEXT"),
         # Rich Keka Master Fields
         ("first_name", "TEXT"),
         ("last_name", "TEXT"),
@@ -378,6 +380,145 @@ def update_candidate_status(candidate_id: int, status: str):
                  (status, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), candidate_id))
     conn.commit()
     conn.close()
+
+
+def insert_candidate(data: dict, source_sheet_name: str = "") -> int:
+    """
+    Inserts a candidate and returns the inserted row ID.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cand_mob = str(data.get("mobile") or "").strip() or None
+    sheet_src = str(source_sheet_name or data.get("source_sheet_name") or "").strip()
+
+    try:
+        cur.execute("""
+            INSERT INTO candidates
+            (candidate_name, mobile, email, applied_designation, negotiated_salary,
+             recent_designation, highest_education, total_experience, core_technical_skills,
+             key_responsibilities, contact_location, department, date_joined, status, tag, source_sheet_name, upload_date, last_updated)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(mobile) DO UPDATE SET
+                candidate_name=COALESCE(NULLIF(excluded.candidate_name, ''), candidates.candidate_name),
+                email=COALESCE(NULLIF(excluded.email, ''), candidates.email),
+                applied_designation=COALESCE(NULLIF(excluded.applied_designation, ''), candidates.applied_designation),
+                negotiated_salary=COALESCE(NULLIF(excluded.negotiated_salary, ''), candidates.negotiated_salary),
+                recent_designation=COALESCE(NULLIF(excluded.recent_designation, ''), candidates.recent_designation),
+                highest_education=COALESCE(NULLIF(excluded.highest_education, ''), candidates.highest_education),
+                total_experience=COALESCE(NULLIF(excluded.total_experience, ''), candidates.total_experience),
+                core_technical_skills=COALESCE(NULLIF(excluded.core_technical_skills, ''), candidates.core_technical_skills),
+                key_responsibilities=COALESCE(NULLIF(excluded.key_responsibilities, ''), candidates.key_responsibilities),
+                contact_location=COALESCE(NULLIF(excluded.contact_location, ''), candidates.contact_location),
+                department=COALESCE(NULLIF(excluded.department, ''), candidates.department),
+                date_joined=COALESCE(NULLIF(excluded.date_joined, ''), candidates.date_joined),
+                tag=COALESCE(NULLIF(excluded.tag, ''), candidates.tag),
+                source_sheet_name=COALESCE(NULLIF(excluded.source_sheet_name, ''), candidates.source_sheet_name),
+                last_updated=excluded.last_updated
+        """, (
+            str(data.get("candidate_name") or "").strip(),
+            cand_mob,
+            str(data.get("email") or "").strip(),
+            str(data.get("applied_designation") or "").strip(),
+            str(data.get("negotiated_salary") or "").strip(),
+            str(data.get("recent_designation") or "").strip(),
+            str(data.get("highest_education") or "").strip(),
+            str(data.get("total_experience") or "").strip(),
+            str(data.get("core_technical_skills") or "").strip(),
+            str(data.get("key_responsibilities") or "").strip(),
+            str(data.get("contact_location") or "").strip(),
+            str(data.get("department") or "").strip(),
+            str(data.get("date_joined") or "").strip(),
+            str(data.get("status") or "Applied").strip(),
+            str(data.get("tag") or "").strip(),
+            sheet_src,
+            now,
+            now
+        ))
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def update_candidate_tag(candidate_id: int, tag: str) -> bool:
+    """Updates candidate status tag (Immediate Joiner, Docs Pending, On Hold, Top Priority)."""
+    if not candidate_id:
+        return False
+    conn = get_connection()
+    try:
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur = conn.cursor()
+        cur.execute("UPDATE candidates SET tag = ?, last_updated = ? WHERE id = ?", (str(tag or "").strip(), now, int(candidate_id)))
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        print("update_candidate_tag error:", e)
+        return False
+    finally:
+        conn.close()
+
+
+def get_candidates_by_tag(tag: str) -> List[dict]:
+    """Returns all candidates with a specific tag."""
+    if not tag:
+        return []
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM candidates WHERE tag = ? AND (archived = 0 OR archived IS NULL) ORDER BY id DESC", (str(tag).strip(),))
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_upcoming_joinees(days: int = 7) -> List[dict]:
+    """
+    Returns active candidates whose expected date_joined falls between today and today + days.
+    """
+    all_cands = get_all_candidates() or []
+    today = datetime.date.today()
+    max_date = today + datetime.timedelta(days=days)
+
+    upcoming = []
+    for c in all_cands:
+        doj_str = str(c.get("date_joined") or "").strip()
+        if not doj_str:
+            continue
+        parsed_dt = None
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+            try:
+                parsed_dt = datetime.datetime.strptime(doj_str, fmt).date()
+                break
+            except ValueError:
+                continue
+
+        if parsed_dt and today <= parsed_dt <= max_date:
+            item = dict(c)
+            item["days_until_joining"] = (parsed_dt - today).days
+            item["parsed_doj"] = parsed_dt.strftime("%Y-%m-%d")
+            upcoming.append(item)
+
+    upcoming.sort(key=lambda x: x["days_until_joining"])
+    return upcoming
+
+
+def get_distinct_source_sheets() -> List[str]:
+    """
+    Returns list of distinct source sheet and department names for quick batch filtering.
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT source_sheet_name FROM candidates WHERE source_sheet_name IS NOT NULL AND source_sheet_name != ''")
+        sources = {row[0].strip() for row in cur.fetchall() if row[0] and row[0].strip()}
+        cur.execute("SELECT DISTINCT department FROM candidates WHERE department IS NOT NULL AND department != ''")
+        depts = {row[0].strip() for row in cur.fetchall() if row[0] and row[0].strip()}
+        all_sheets = sorted(list(sources.union(depts)))
+        return all_sheets
+    finally:
+        conn.close()
 
 def update_candidate_extra_details(candidate_id: int, father_name: str, full_address: str, gender: str, department: str, date_joined: str, employee_number: str):
     conn = get_connection()
