@@ -27,6 +27,7 @@ Checks performed:
 
 import os
 import sys
+import time
 import datetime
 
 # Configure UTF-8 encoding for Windows console output
@@ -126,198 +127,206 @@ def run_tests():
     init_dispatched = initial_stats["dispatched_today"]
 
     # 2a. Insert Candidate in 'Selected' status with welcome_email_sent = 0
-    test_mobile_cand = "9988776655"
-    db_manager.upsert_candidate({
-        "candidate_name": "Task 7 Selected Candidate",
-        "mobile": test_mobile_cand,
-        "applied_designation": "Staff Nurse",
-        "status": "Selected",
-    }, "task7_test.xlsx")
+    test_mobile_cand = f"9988{int(time.time()*100)%1000000:06d}"
+    staging_id = None
+    log_id = None
+    test_cid = None
+    try:
+        db_manager.upsert_candidate({
+            "candidate_name": "Task 7 Selected Candidate",
+            "mobile": test_mobile_cand,
+            "applied_designation": "Staff Nurse",
+            "status": "Selected",
+        }, "task7_test.xlsx")
 
-    test_cand = db_manager.get_candidate_by_mobile(test_mobile_cand)
-    assert test_cand is not None, "Failed to fetch test candidate"
-    test_cid = test_cand["id"]
-    db_manager.update_candidate_status(test_cid, "Selected")
-    conn = db_manager.get_connection()
-    conn.execute("UPDATE candidates SET welcome_email_sent = 0, archived = 0 WHERE id = ?", (test_cid,))
-    conn.commit()
-    conn.close()
+        test_cand = db_manager.get_candidate_by_mobile(test_mobile_cand)
+        assert test_cand is not None, "Failed to fetch test candidate"
+        test_cid = test_cand["id"]
+        db_manager.update_candidate_status(test_cid, "Selected")
+        conn = db_manager.get_connection()
+        conn.execute("UPDATE candidates SET welcome_email_sent = 0, archived = 0 WHERE id = ?", (test_cid,))
+        conn.commit()
+        conn.close()
 
-    after_cand_stats = dashboard_service.get_dashboard_stats()
-    print(f"   • Pending Welcome Emails: initial={init_pending}, new={after_cand_stats['pending_welcome_emails']}")
-    assert after_cand_stats["pending_welcome_emails"] == init_pending + 1, (
-        f"Expected pending welcome emails to increase by 1, got {after_cand_stats['pending_welcome_emails']}"
-    )
-    print("   ✓ 'pending_welcome_emails' increment verified accurately.")
+        after_cand_stats = dashboard_service.get_dashboard_stats()
+        print(f"   • Pending Welcome Emails: initial={init_pending}, new={after_cand_stats['pending_welcome_emails']}")
+        assert after_cand_stats["pending_welcome_emails"] == init_pending + 1, (
+            f"Expected pending welcome emails to increase by 1, got {after_cand_stats['pending_welcome_emails']}"
+        )
+        print("   ✓ 'pending_welcome_emails' increment verified accurately.")
 
-    # 2b. Insert Staging Record with status = 'Staged'
-    staging_id = db_manager.create_staging_record(
-        candidate_id=test_cid,
-        document_type="offer",
-        doc_file_path="task7_test.docx",
-        pdf_file_path="task7_test.pdf",
-        preferred_format="pdf",
-        recipient_email="task7_test@example.com",
-        recipient_name="Task 7 Candidate",
-        email_subject="Offer of Employment - Task 7 Test",
-        email_body="Welcome to DFY!",
-        reference_number="DFY/HR/T7/001",
-    )
-    assert staging_id is not None, "Failed to create staging record"
+        # 2b. Insert Staging Record with status = 'Staged'
+        staging_id = db_manager.create_staging_record(
+            candidate_id=test_cid,
+            document_type="offer",
+            doc_file_path="task7_test.docx",
+            pdf_file_path="task7_test.pdf",
+            preferred_format="pdf",
+            recipient_email="task7_test@example.com",
+            recipient_name="Task 7 Candidate",
+            email_subject="Offer of Employment - Task 7 Test",
+            email_body="Welcome to DFY!",
+            reference_number="DFY/HR/T7/001",
+        )
+        assert staging_id is not None, "Failed to create staging record"
 
-    after_staged_stats = dashboard_service.get_dashboard_stats()
-    print(f"   • Staged Letters Ready: initial={init_staged}, new={after_staged_stats['staged_letters_ready']}")
-    assert after_staged_stats["staged_letters_ready"] == init_staged + 1, (
-        f"Expected staged letters ready to increase by 1, got {after_staged_stats['staged_letters_ready']}"
-    )
-    print("   ✓ 'staged_letters_ready' increment verified accurately.")
+        after_staged_stats = dashboard_service.get_dashboard_stats()
+        print(f"   • Staged Letters Ready: initial={init_staged}, new={after_staged_stats['staged_letters_ready']}")
+        assert after_staged_stats["staged_letters_ready"] == init_staged + 1, (
+            f"Expected staged letters ready to increase by 1, got {after_staged_stats['staged_letters_ready']}"
+        )
+        print("   ✓ 'staged_letters_ready' increment verified accurately.")
 
-    # 2c. Insert Email Log Entry dispatched today with status = 'Sent'
-    log_id = db_manager.log_email_dispatch(
-        recipient_email="task7_test@example.com",
-        recipient_name="Task 7 Candidate",
-        document_type="offer",
-        subject="Offer Letter Dispatched Today",
-        sent_by="HR Desktop",
-        status="Sent",
-        candidate_id=test_cid,
-    )
-    assert log_id is not None, "Failed to log email dispatch"
+        # 2c. Insert Email Log Entry dispatched today with status = 'Sent'
+        log_id = db_manager.log_email_dispatch(
+            recipient_email="task7_test@example.com",
+            recipient_name="Task 7 Candidate",
+            document_type="offer",
+            subject="Offer Letter Dispatched Today",
+            sent_by="HR Desktop",
+            status="Sent",
+            candidate_id=test_cid,
+        )
+        assert log_id is not None, "Failed to log email dispatch"
 
-    after_email_stats = dashboard_service.get_dashboard_stats()
-    print(f"   • Dispatched Today: initial={init_dispatched}, new={after_email_stats['dispatched_today']}")
-    assert after_email_stats["dispatched_today"] == init_dispatched + 1, (
-        f"Expected dispatched today to increase by 1, got {after_email_stats['dispatched_today']}"
-    )
-    print("   ✓ 'dispatched_today' increment verified accurately.")
+        after_email_stats = dashboard_service.get_dashboard_stats()
+        print(f"   • Dispatched Today: initial={init_dispatched}, new={after_email_stats['dispatched_today']}")
+        assert after_email_stats["dispatched_today"] == init_dispatched + 1, (
+            f"Expected dispatched today to increase by 1, got {after_email_stats['dispatched_today']}"
+        )
+        print("   ✓ 'dispatched_today' increment verified accurately.")
 
-    # 2d. Verify Smart Rule Detector alignment
-    detected = smart_rule_detector.scan_all_candidates_for_document_needs()
-    print(f"   • Letters to Generate (Smart Detector): count={len(detected)}, stats={after_email_stats['letters_to_generate']}")
-    assert after_email_stats["letters_to_generate"] == len(detected), (
-        "letters_to_generate in stats must equal length of detected suggestions"
-    )
-    print("   ✓ 'letters_to_generate' matches smart rule detector scan results.")
+        # 2d. Verify Smart Rule Detector alignment
+        detected = smart_rule_detector.scan_all_candidates_for_document_needs()
+        print(f"   • Letters to Generate (Smart Detector): count={len(detected)}, stats={after_email_stats['letters_to_generate']}")
+        assert after_email_stats["letters_to_generate"] == len(detected), (
+            "letters_to_generate in stats must equal length of detected suggestions"
+        )
+        print("   ✓ 'letters_to_generate' matches smart rule detector scan results.")
 
-    # -------------------------------------------------------------------------
-    # TEST 3: UI Instantiation & Action Cards Hierarchy
-    # -------------------------------------------------------------------------
-    print("\n[3/5] Instantiating dashboard_view and inspecting Action Cards...")
-    page = MockFletPage()
-    nav_history = []
+        # -------------------------------------------------------------------------
+        # TEST 3: UI Instantiation & Action Cards Hierarchy
+        # -------------------------------------------------------------------------
+        print("\n[3/5] Instantiating dashboard_view and inspecting Action Cards...")
+        page = MockFletPage()
+        nav_history = []
 
-    def mock_on_navigate(target, **kwargs):
-        nav_history.append((target, kwargs))
-        print(f"   [Nav Event] Navigated to: {target} (params: {kwargs})")
+        def mock_on_navigate(target, **kwargs):
+            nav_history.append((target, kwargs))
+            print(f"   [Nav Event] Navigated to: {target} (params: {kwargs})")
 
-    view = dashboard_view(page, on_navigate=mock_on_navigate)
-    assert view is not None, "dashboard_view returned None"
+        view = dashboard_view(page, on_navigate=mock_on_navigate)
+        assert view is not None, "dashboard_view returned None"
 
-    # Verify action cards exist on view
-    assert hasattr(view, "action_cards_row"), "view missing action_cards_row"
-    cards = view.action_cards_row.controls
-    print(f"   Rendered Action Cards count: {len(cards)}")
-    assert len(cards) == 4, "Must render exactly 4 prominent action cards"
+        # Verify action cards exist on view
+        assert hasattr(view, "action_cards_row"), "view missing action_cards_row"
+        cards = view.action_cards_row.controls
+        print(f"   Rendered Action Cards count: {len(cards)}")
+        assert len(cards) == 4, "Must render exactly 4 prominent action cards"
 
-    # Card 1: Pending Welcome Emails
-    card_welcome = cards[0]
-    assert hasattr(card_welcome, "content"), "Card 1 missing content"
-    card1_title = card_welcome.content.controls[3].value
-    print(f"   • Card 1 title: '{card1_title}'")
-    assert "Pending Welcome Emails" in card1_title
+        # Card 1: Pending Welcome Emails
+        card_welcome = cards[0]
+        assert hasattr(card_welcome, "content"), "Card 1 missing content"
+        card1_title = card_welcome.content.controls[3].value
+        print(f"   • Card 1 title: '{card1_title}'")
+        assert "Pending Welcome" in card1_title
 
-    # Card 2: Letters to Generate
-    card_letters = cards[1]
-    card2_title = card_letters.content.controls[3].value
-    print(f"   • Card 2 title: '{card2_title}'")
-    assert "Letters to Generate" in card2_title
+        # Card 2: Letters to Generate
+        card_letters = cards[1]
+        card2_title = card_letters.content.controls[3].value
+        print(f"   • Card 2 title: '{card2_title}'")
+        assert "Letters to Generate" in card2_title
 
-    # Card 3: Staged Ready for Final Go
-    card_staging = cards[2]
-    card3_title = card_staging.content.controls[3].value
-    print(f"   • Card 3 title: '{card3_title}'")
-    assert "Staged Ready for Final Go" in card3_title
+        # Card 3: Staged Ready for Final Go
+        card_staging = cards[2]
+        card3_title = card_staging.content.controls[3].value
+        print(f"   • Card 3 title: '{card3_title}'")
+        assert "Staged" in card3_title
 
-    # Card 4: In Pipeline / Interviews
-    card_pipeline = cards[3]
-    card4_title = card_pipeline.content.controls[3].value
-    print(f"   • Card 4 title: '{card4_title}'")
-    assert "In Pipeline" in card4_title or "Interviews" in card4_title
+        # Card 4: In Pipeline / Interviews
+        card_pipeline = cards[3]
+        card4_title = card_pipeline.content.controls[3].value
+        print(f"   • Card 4 title: '{card4_title}'")
+        assert "In Pipeline" in card4_title or "Interviews" in card4_title
 
-    print("   ✅ All 4 Action Cards created and titled appropriately.")
+        print("   ✅ All 4 Action Cards created and titled appropriately.")
 
-    # -------------------------------------------------------------------------
-    # TEST 4: Click Handlers and Navigation Wiring
-    # -------------------------------------------------------------------------
-    print("\n[4/5] Testing navigation click triggers on all 4 Action Cards...")
+        # -------------------------------------------------------------------------
+        # TEST 4: Click Handlers and Navigation Wiring
+        # -------------------------------------------------------------------------
+        print("\n[4/5] Testing navigation click triggers on all 4 Action Cards...")
 
-    # Click Card 1: Should navigate to joining process with selected filter
-    print("   Triggering Card 1 click (Pending Welcome Emails)...")
-    nav_history.clear()
-    card_welcome.on_click(None)
-    assert len(nav_history) == 1, "Card 1 click did not trigger navigation"
-    target, kwargs = nav_history[0]
-    assert target == "joining", f"Expected target 'joining', got {target}"
-    assert kwargs.get("filter") == "selected", f"Expected filter='selected', got {kwargs}"
-    print("   ✓ Card 1 correctly routed to Joining Process with Selected filter.")
+        # Click Card 1: Should navigate to joining process with selected filter
+        print("   Triggering Card 1 click (Pending Welcome Emails)...")
+        nav_history.clear()
+        card_welcome.on_click(None)
+        assert len(nav_history) == 1, "Card 1 click did not trigger navigation"
+        target, kwargs = nav_history[0]
+        assert target == "joining", f"Expected target 'joining', got {target}"
+        assert kwargs.get("filter") == "selected", f"Expected filter='selected', got {kwargs}"
+        print("   ✓ Card 1 correctly routed to Joining Process with Selected filter.")
 
-    # Click Card 2: Should navigate to document generator tab 0 (Smart Detector)
-    print("   Triggering Card 2 click (Letters to Generate)...")
-    nav_history.clear()
-    card_letters.on_click(None)
-    assert len(nav_history) == 1, "Card 2 click did not trigger navigation"
-    target, kwargs = nav_history[0]
-    assert target == "documents", f"Expected target 'documents', got {target}"
-    assert kwargs.get("tab") == 0, f"Expected tab=0, got {kwargs}"
-    print("   ✓ Card 2 correctly routed to Document Generator Tab 1 (Smart Detector).")
+        # Click Card 2: Should navigate to document generator tab 0 (Smart Detector)
+        print("   Triggering Card 2 click (Letters to Generate)...")
+        nav_history.clear()
+        card_letters.on_click(None)
+        assert len(nav_history) == 1, "Card 2 click did not trigger navigation"
+        target, kwargs = nav_history[0]
+        assert target == "documents", f"Expected target 'documents', got {target}"
+        assert kwargs.get("tab") == 0, f"Expected tab=0, got {kwargs}"
+        print("   ✓ Card 2 correctly routed to Document Generator Tab 1 (Smart Detector).")
 
-    # Click Card 3: Should navigate to document generator tab 1 (Staging Queue)
-    print("   Triggering Card 3 click (Staged Ready for Final Go)...")
-    nav_history.clear()
-    card_staging.on_click(None)
-    assert len(nav_history) == 1, "Card 3 click did not trigger navigation"
-    target, kwargs = nav_history[0]
-    assert target == "documents", f"Expected target 'documents', got {target}"
-    assert kwargs.get("tab") == 1, f"Expected tab=1, got {kwargs}"
-    print("   ✓ Card 3 correctly routed to Document Generator Tab 2 (Staging Queue).")
+        # Click Card 3: Should navigate to document generator tab 1 (Staging Queue)
+        print("   Triggering Card 3 click (Staged Ready for Final Go)...")
+        nav_history.clear()
+        card_staging.on_click(None)
+        assert len(nav_history) == 1, "Card 3 click did not trigger navigation"
+        target, kwargs = nav_history[0]
+        assert target == "documents", f"Expected target 'documents', got {target}"
+        assert kwargs.get("tab") == 1, f"Expected tab=1, got {kwargs}"
+        print("   ✓ Card 3 correctly routed to Document Generator Tab 2 (Staging Queue).")
 
-    # Click Card 4: Should navigate to joining process
-    print("   Triggering Card 4 click (In Pipeline / Interviews)...")
-    nav_history.clear()
-    card_pipeline.on_click(None)
-    assert len(nav_history) == 1, "Card 4 click did not trigger navigation"
-    target, kwargs = nav_history[0]
-    assert target == "joining", f"Expected target 'joining', got {target}"
-    print("   ✓ Card 4 correctly routed to Joining Process.")
+        # Click Card 4: Should navigate to joining process
+        print("   Triggering Card 4 click (In Pipeline / Interviews)...")
+        nav_history.clear()
+        card_pipeline.on_click(None)
+        assert len(nav_history) == 1, "Card 4 click did not trigger navigation"
+        target, kwargs = nav_history[0]
+        assert target == "joining", f"Expected target 'joining', got {target}"
+        print("   ✓ Card 4 correctly routed to Joining Process.")
 
-    # -------------------------------------------------------------------------
-    # TEST 5: Operations Activity Log & Dynamic Refresh Logic
-    # -------------------------------------------------------------------------
-    print("\n[5/5] Verifying Activity Log & dynamic refresh...")
-    assert hasattr(view, "activity_card"), "view missing activity_card"
-    assert view.activity_card is not None
-    print("   ✓ Operations Activity Log card verified.")
+        # -------------------------------------------------------------------------
+        # TEST 5: Operations Activity Log & Dynamic Refresh Logic
+        # -------------------------------------------------------------------------
+        print("\n[5/5] Verifying Activity Log & dynamic refresh...")
+        assert hasattr(view, "activity_card"), "view missing activity_card"
+        assert view.activity_card is not None
+        print("   ✓ Operations Activity Log card verified.")
 
-    # Recent dispatches and recent generations backend helpers
-    recent_dispatches = dashboard_service.get_recent_email_dispatches(limit=5)
-    recent_gens = dashboard_service.get_recent_document_generations(limit=5)
-    print(f"   • Recent dispatches count: {len(recent_dispatches)}")
-    print(f"   • Recent generations count: {len(recent_gens)}")
-    assert len(recent_dispatches) > 0, "Expected at least 1 recent dispatch log"
+        # Recent dispatches and recent generations backend helpers
+        recent_dispatches = dashboard_service.get_recent_email_dispatches(limit=5)
+        recent_gens = dashboard_service.get_recent_document_generations(limit=5)
+        print(f"   • Recent dispatches count: {len(recent_dispatches)}")
+        print(f"   • Recent generations count: {len(recent_gens)}")
+        assert len(recent_dispatches) > 0, "Expected at least 1 recent dispatch log"
 
-    # Trigger dynamic refresh
-    print("   Triggering view.refresh_dashboard()...")
-    view.refresh_dashboard()
-    print("   ✓ refresh_dashboard() executed cleanly without raising exceptions.")
+        # Trigger dynamic refresh
+        print("   Triggering view.refresh_dashboard()...")
+        view.refresh_dashboard()
+        print("   ✓ refresh_dashboard() executed cleanly without raising exceptions.")
 
-    # Cleanup test data
-    conn = db_manager.get_connection()
-    conn.execute("DELETE FROM document_staging WHERE id = ?", (staging_id,))
-    conn.execute("DELETE FROM email_log WHERE id = ?", (log_id,))
-    conn.execute("DELETE FROM candidates WHERE id = ?", (test_cid,))
-    conn.commit()
-    conn.close()
-    print("   ✓ Test data cleaned up successfully.")
+    finally:
+        # Cleanup test data
+        conn = db_manager.get_connection()
+        if staging_id:
+            conn.execute("DELETE FROM document_staging WHERE id = ?", (staging_id,))
+        if log_id:
+            conn.execute("DELETE FROM email_log WHERE id = ?", (log_id,))
+        if test_cid:
+            conn.execute("DELETE FROM candidates WHERE id = ?", (test_cid,))
+        conn.commit()
+        conn.close()
+        print("   ✓ Test data cleaned up successfully.")
 
     print("\n" + "=" * 70)
     print("ALL TASK 7 DASHBOARD METRICS & ACTION CARDS TESTS PASSED! ✅")

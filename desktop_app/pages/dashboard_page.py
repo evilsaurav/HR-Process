@@ -124,7 +124,7 @@ def dashboard_view(page: ft.Page, on_navigate: Optional[Callable] = None):
         return card
 
     card_welcome = build_action_card(
-        title="Pending Welcome",
+        title="Pending Welcome Emails",
         subtitle="Selected awaiting welcome",
         count_ctrl=welcome_count_text,
         icon=ft.Icons.MARK_EMAIL_UNREAD_ROUNDED,
@@ -146,7 +146,7 @@ def dashboard_view(page: ft.Page, on_navigate: Optional[Callable] = None):
     )
 
     card_staging = build_action_card(
-        title="Staged Final Go",
+        title="Staged Ready for Final Go",
         subtitle="Draft letters ready to dispatch",
         count_ctrl=staging_count_text,
         icon=ft.Icons.ROCKET_LAUNCH_ROUNDED,
@@ -815,6 +815,8 @@ def dashboard_view(page: ft.Page, on_navigate: Optional[Callable] = None):
     view_column.action_cards_row = action_cards_row
     view_column.bento_grid_row = bento_grid_row
     view_column.operations_tabs = operations_tabs
+    view_column.operations_hub_card = operations_hub_card
+    view_column.activity_card = operations_hub_card
     view_column.card_welcome = card_welcome
     view_column.card_letters = card_letters
     view_column.card_staging = card_staging
