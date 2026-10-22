@@ -140,28 +140,7 @@ def keka_sync_view(page: ft.Page):
             print("Save file error:", ex)
 
     # ---------------- Upload & Sync Handler ----------------
-    def sync_clicked(e):
-        if not selected_file["path"]:
-            show_message("Please select a Keka export file first.", False)
-            return
-
-        sync_button.disabled = True
-        progress_indicator.visible = True
-        result_container.content = None
-        page.update()
-
-        try:
-            res = keka_sync_service.process_rich_keka_sheet(
-                selected_file["path"],
-                allow_new_inserts=import_new_switch.value
-            )
-        except Exception as ex:
-            print("Keka sync exception:", traceback.format_exc())
-            res = {
-                "success": False,
-                "error": "Something went wrong while processing the file. Please check the file format and try again."
-            }
-
+    def render_sync_results(res: dict):
         progress_indicator.visible = False
         sync_button.disabled = False
 
@@ -184,6 +163,7 @@ def keka_sync_view(page: ft.Page):
             total_rows = res.get("total_rows", 0)
             matched_count = res.get("matched_count", 0)
             updated_count = res.get("updated_count", 0)
+            kept_count = res.get("kept_count", 0)
             inserted_count = res.get("inserted_count", 0)
             detected_fields = res.get("detected_fields", [])
             unmatched_count = len(last_unmatched_rows)
@@ -207,13 +187,28 @@ def keka_sync_view(page: ft.Page):
                             size=15, weight=ft.FontWeight.BOLD, color=COLOR_SUCCESS
                         )
                     )
-                    already_up_to_date = matched_count - updated_count
-                    summary_items.append(
-                        ft.Text(
-                            f"→ {updated_count} record(s) updated with Keka master data. {already_up_to_date} record(s) were already up to date.",
-                            size=12, color=COLOR_TEXT_SECONDARY
+                    if updated_count > 0:
+                        summary_items.append(
+                            ft.Text(
+                                f"→ 🔄 {updated_count} existing record(s) updated with Keka master data.",
+                                size=12, color=COLOR_SUCCESS
+                            )
                         )
-                    )
+                    if kept_count > 0:
+                        summary_items.append(
+                            ft.Text(
+                                f"→ 🛡️ {kept_count} existing record(s) kept intact in database (skipped overwriting).",
+                                size=12, color=COLOR_TEXT_SECONDARY
+                            )
+                        )
+                    already_up_to_date = matched_count - (updated_count + kept_count)
+                    if already_up_to_date > 0:
+                        summary_items.append(
+                            ft.Text(
+                                f"→ {already_up_to_date} record(s) were already identical and up to date.",
+                                size=12, color=COLOR_TEXT_MUTED
+                            )
+                        )
 
                 if inserted_count > 0:
                     summary_items.append(
@@ -283,10 +278,203 @@ def keka_sync_view(page: ft.Page):
 
             if matched_count == 0 and inserted_count == 0 and total_rows > 0:
                 show_message("Sync complete: No matching employee records found.", False)
-            elif (updated_count + inserted_count) > 0:
-                show_message(f"Sync complete! {updated_count} updated, {inserted_count} new employees added.", True)
+            elif (updated_count + inserted_count + kept_count) > 0:
+                show_message(f"Sync complete! {updated_count} updated, {kept_count} kept, {inserted_count} new employees added.", True)
             else:
                 show_message("Sync complete! All matching records were already up to date.", True)
+
+        refresh_pending_queue()
+        page.update()
+
+    def open_warning_and_resolution_dialog(detection: dict):
+        conflicts = detection.get("conflicting_employees", [])
+        is_reupload = detection.get("is_sheet_reupload", False)
+        internal_dups = detection.get("internal_duplicates", [])
+        identical = detection.get("identical_matches", [])
+        total_rows = detection.get("total_rows", 0)
+
+        items_list = []
+
+        # Subtitle explanation
+        reasons = []
+        if is_reupload:
+            reasons.append(f"Sheet Re-upload Detected ({len(conflicts) + len(identical)} of {total_rows} rows match database candidates)")
+        if conflicts:
+            reasons.append(f"{len(conflicts)} employee(s) exist in DB with differing information")
+        if internal_dups:
+            reasons.append(f"{len(internal_dups)} duplicate employee ID(s) found across multiple sheet rows")
+
+        subtitle = " • ".join(reasons)
+        items_list.append(
+            ft.Text(subtitle, size=13, color=ft.Colors.ORANGE_200, weight=ft.FontWeight.W_500)
+        )
+
+        if internal_dups:
+            dup_widgets = []
+            for d in internal_dups[:4]:
+                rows_str = ", ".join(f"Row {r}" for r in d.get("rows", []))
+                dup_widgets.append(
+                    ft.Text(f"• ID '{d.get('employee_number')}': appears in {rows_str} ({d.get('candidate_name', 'Employee')})",
+                            size=12, color=COLOR_WARNING)
+                )
+            items_list.append(ft.Container(
+                bgcolor=COLOR_CARD_BG_HOVER,
+                padding=8,
+                border_radius=6,
+                border=ft.Border.all(1, ft.Colors.ORANGE_700),
+                content=ft.Column([
+                    ft.Text("⚠️ Sheet-Internal Duplicates:", size=12, weight=ft.FontWeight.BOLD, color=COLOR_WARNING),
+                    *dup_widgets
+                ], spacing=3)
+            ))
+
+        if conflicts:
+            conflict_cards = []
+            for c in conflicts[:6]:
+                cand_name = c.get("candidate_name", "Employee")
+                emp_no = c.get("employee_number") or "N/A"
+                mob = c.get("mobile") or "N/A"
+                changes = c.get("changed_fields", {})
+
+                chg_lines = []
+                for field, chg in changes.items():
+                    old_val = chg.get("old") if chg.get("old") else "(blank)"
+                    new_val = chg.get("new") if chg.get("new") else "(blank)"
+                    lbl = field.replace("_", " ").title()
+                    chg_lines.append(
+                        ft.Text(f"  • {lbl}: '{old_val}' ➔ '{new_val}'", size=11, color=COLOR_TEXT_SECONDARY)
+                    )
+
+                conflict_cards.append(
+                    ft.Container(
+                        bgcolor=COLOR_CARD_BG,
+                        padding=8,
+                        border_radius=6,
+                        border=ft.Border.all(1, COLOR_CARD_BORDER),
+                        content=ft.Column([
+                            ft.Row([
+                                ft.Icon(ft.Icons.PERSON_PIN_ROUNDED, size=16, color=COLOR_PRIMARY_LIGHT),
+                                ft.Text(f"{cand_name} (Code: {emp_no}, Mob: {mob})", size=12, weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY),
+                            ], spacing=6),
+                            *chg_lines
+                        ], spacing=2)
+                    )
+                )
+            if len(conflicts) > 6:
+                conflict_cards.append(
+                    ft.Text(f"... and {len(conflicts) - 6} more employee(s) with differences.", size=11, color=COLOR_TEXT_MUTED, italic=True)
+                )
+
+            items_list.append(ft.Text("Detected Field Differences vs Database Records:", size=12, weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY))
+            items_list.append(
+                ft.Container(
+                    height=min(200, max(70, len(conflicts) * 50)),
+                    content=ft.ListView(conflict_cards, spacing=5)
+                )
+            )
+
+        items_list.append(
+            ft.Text(
+                "Please choose how to proceed with existing employee records:\n"
+                "• 'Update Existing': Applies incoming sheet values to existing database records.\n"
+                "• 'Keep Database Records': Retains current DB records untouched (imports only brand-new staff).",
+                size=12, color=COLOR_TEXT_MUTED, italic=True
+            )
+        )
+
+        def do_resolve(action: str):
+            page.close(dlg)
+            progress_indicator.visible = True
+            page.update()
+            try:
+                res = keka_sync_service.sync_rich_keka_sheet_with_resolutions(
+                    file_path=selected_file["path"],
+                    default_action=action,
+                    allow_new_inserts=import_new_switch.value
+                )
+            except Exception as ex:
+                print("Resolution sync error:", traceback.format_exc())
+                res = {"success": False, "error": str(ex)}
+            render_sync_results(res)
+
+        def do_cancel(e):
+            page.close(dlg)
+            sync_button.disabled = False
+            progress_indicator.visible = False
+            page.update()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Row([
+                ft.Icon(ft.Icons.WARNING_ROUNDED, color=COLOR_WARNING, size=24),
+                ft.Text("Existing Employee Records / Potential Duplicates", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY, size=16),
+            ], spacing=8),
+            content=ft.Container(
+                width=560,
+                content=ft.Column(items_list, spacing=8, tight=True)
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=do_cancel),
+                ft.ElevatedButton(
+                    "🛡️ Keep Database Records (Skip Sheet Duplicates)",
+                    bgcolor=COLOR_CARD_BG_HOVER,
+                    color=COLOR_TEXT_PRIMARY,
+                    on_click=lambda e: do_resolve("keep")
+                ),
+                ft.ElevatedButton(
+                    "🔄 Update Existing with Sheet Data",
+                    bgcolor=PRIMARY_COLOR,
+                    color=ft.Colors.WHITE,
+                    on_click=lambda e: do_resolve("update")
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.open(dlg)
+        page.update()
+
+    def sync_clicked(e):
+        if not selected_file["path"]:
+            show_message("Please select a Keka export file first.", False)
+            return
+
+        sync_button.disabled = True
+        progress_indicator.visible = True
+        result_container.content = None
+        page.update()
+
+        try:
+            detection = keka_sync_service.detect_keka_conflicts_and_duplicates(selected_file["path"])
+        except Exception as ex:
+            print("Keka conflict detection exception:", traceback.format_exc())
+            detection = {
+                "success": False,
+                "error": "Something went wrong while analyzing the file. Please check the file format and try again."
+            }
+
+        if not detection.get("success"):
+            render_sync_results(detection)
+            return
+
+        conflicts = detection.get("conflicting_employees", [])
+        is_reupload = detection.get("is_sheet_reupload", False)
+        internal_dups = detection.get("internal_duplicates", [])
+
+        if conflicts or is_reupload or internal_dups:
+            progress_indicator.visible = False
+            page.update()
+            open_warning_and_resolution_dialog(detection)
+        else:
+            try:
+                res = keka_sync_service.sync_rich_keka_sheet_with_resolutions(
+                    file_path=selected_file["path"],
+                    default_action="update",
+                    allow_new_inserts=import_new_switch.value
+                )
+            except Exception as ex:
+                print("Direct sync exception:", traceback.format_exc())
+                res = {"success": False, "error": str(ex)}
+            render_sync_results(res)
 
         refresh_pending_queue()
         page.update()

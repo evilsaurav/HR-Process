@@ -1,6 +1,8 @@
 import sqlite3
 import datetime
 import json
+import re
+from typing import Optional
 from config import DB_PATH
 from services.encryption import encrypt_text, decrypt_text
 
@@ -121,6 +123,9 @@ def init_db():
     for col_name, col_type in new_candidate_columns:
         if col_name not in existing_cand_cols:
             cur.execute(f"ALTER TABLE candidates ADD COLUMN {col_name} {col_type}")
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_candidates_employee_number ON candidates(employee_number)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_candidates_mobile ON candidates(mobile)")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -471,9 +476,31 @@ def update_candidate_keka_master(candidate_id: int, fields: dict) -> bool:
 def insert_keka_employee(fields: dict, source_sheet_name: str = "") -> int | None:
     """
     Inserts a newly onboarded employee from Keka master sheet into the candidates table.
+    Guarantees duplicate employee prevention:
+    If employee_number or mobile already exists, does NOT insert a duplicate candidate row.
+    Instead, updates the existing candidate via update_candidate_keka_master and returns existing ID.
     """
     if not fields:
         return None
+
+    emp_no = str(fields.get("employee_number", "") or "").strip()
+    if emp_no.endswith(".0"):
+        emp_no = emp_no[:-2]
+    if emp_no and emp_no.lower() not in ["none", "nan", "null"]:
+        existing = get_candidate_by_employee_number(emp_no)
+        if existing:
+            update_candidate_keka_master(existing["id"], fields)
+            return existing["id"]
+
+    raw_mob = str(fields.get("mobile", "") or "").strip()
+    clean_mob = re.sub(r"\D", "", raw_mob)
+    if len(clean_mob) >= 10:
+        clean_mob = clean_mob[-10:]
+    if clean_mob and clean_mob.lower() not in ["none", "nan", "null"]:
+        existing_mob = get_candidate_by_mobile(clean_mob)
+        if existing_mob:
+            update_candidate_keka_master(existing_mob["id"], fields)
+            return existing_mob["id"]
 
     conn = get_connection()
     try:
@@ -483,6 +510,10 @@ def insert_keka_employee(fields: dict, source_sheet_name: str = "") -> int | Non
 
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data = {k: str(v).strip() for k, v in fields.items() if k in valid_cols and v is not None and str(v).strip() not in ["", "None", "nan", "null"]}
+        if emp_no:
+            data["employee_number"] = emp_no
+        if clean_mob:
+            data["mobile"] = clean_mob
         data["source_sheet_name"] = source_sheet_name
         data["upload_date"] = now
         data["last_updated"] = now
@@ -751,6 +782,27 @@ def get_candidate_by_mobile(mobile: str) -> dict | None:
     res = dict(zip(cols, row))
     conn.close()
     return res
+
+def get_candidate_by_employee_number(employee_number: str) -> Optional[dict]:
+    """Finds a candidate by employee_number."""
+    if not employee_number:
+        return None
+    clean_emp = str(employee_number).strip()
+    if clean_emp.endswith(".0"):
+        clean_emp = clean_emp[:-2]
+    if not clean_emp or clean_emp.lower() in ["none", "nan", "null"]:
+        return None
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM candidates WHERE employee_number = ?", (clean_emp,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+    finally:
+        conn.close()
 
 def update_employee_lifecycle_data(mobile: str, employee_number: str = None, relieving_date: str = None) -> bool:
     """
