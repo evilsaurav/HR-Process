@@ -26,6 +26,7 @@ from services import (
     pdf_converter_service,
     excel_export_service,
     email_service,
+    zip_export_service,
 )
 from utils.email_preview_modal import open_email_preview_modal
 from utils.ui_theme import (
@@ -1313,13 +1314,38 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
     btn_refresh_staging.on_click = lambda e: (refresh_staging_table(), show_message("Staging queue refreshed!", True), page.update())
     btn_final_go.on_click = open_final_go_confirmation
 
+    def on_export_bulk_zip(e):
+        staged_records = state.get("staged_records", [])
+        sel_ids = state.get("selected_staging_ids", set())
+        if sel_ids:
+            records_to_export = [r for r in staged_records if r.get("id") in sel_ids]
+        else:
+            records_to_export = [r for r in staged_records if r.get("file_path")]
+
+        paths = [r.get("file_path") for r in records_to_export if r.get("file_path")]
+        if not paths:
+            show_message("No document files found to package into ZIP.", False)
+            return
+        ok, zpath, err = zip_export_service.create_bulk_document_zip(paths, "DFY_Staged_Documents.zip")
+        if ok:
+            show_message(f"Packaged {len(paths)} document(s) into ZIP: {os.path.basename(zpath)}!", True)
+        else:
+            show_message(f"ZIP Export error: {err}", False)
+
+    btn_export_zip = secondary_button(
+        "Export ZIP Package",
+        icon=ft.Icons.FOLDER_ZIP_ROUNDED,
+        on_click=on_export_bulk_zip,
+    )
+
     # Build Tab 2 Card
     tab2_card = modern_card(ft.Column([
         ft.Row([
             section_title(ft.Icons.FACT_CHECK_ROUNDED, "Step 2: Staged Drafts Review & Final Go Bulk Dispatch"),
             ft.Container(expand=True),
+            btn_export_zip,
             btn_refresh_staging,
-        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, spacing=8),
         ft.Divider(height=10, color=COLOR_CARD_BORDER),
         ft.Text(
             "Review draft documents in OS viewer (Word/PDF). Use '✏️ Fix Details' for instant corrections with document regeneration. "

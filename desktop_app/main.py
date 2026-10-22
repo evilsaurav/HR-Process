@@ -1,10 +1,11 @@
 from utils.flet_compat import apply_flet_compat_shims
 apply_flet_compat_shims()
 
+import os
 import threading
 import time
 import flet as ft
-from config import APP_TITLE, PRIMARY_COLOR
+from config import APP_TITLE, PRIMARY_COLOR, ASSETS_DIR
 from database import db_manager
 from services import email_scheduler_service
 from pages.dashboard_page import dashboard_view
@@ -12,6 +13,7 @@ from pages.joining_process_page import joining_process_view
 from pages.keka_sync_page import keka_sync_view
 from pages.document_generation_page import document_generation_view
 from pages.settings_page import settings_view
+from pages.help_center_page import help_center_view
 from utils.ui_theme import app_footer
 
 _scheduler_started = False
@@ -40,6 +42,14 @@ def main(page: ft.Page):
     page.padding = 0
     page.spacing = 0
 
+    logo_path = os.path.join(ASSETS_DIR, "dfy_logo112.png")
+    if os.path.exists(logo_path):
+        try:
+            if hasattr(page, "window") and hasattr(page.window, "icon"):
+                page.window.icon = logo_path
+        except Exception:
+            pass
+
     # Initialize SQLite Database
     db_manager.init_db()
     start_scheduler_thread()
@@ -61,6 +71,8 @@ def main(page: ft.Page):
                 "documents": 3,
                 "document_generation": 3,
                 "settings": 4,
+                "help": 5,
+                "help_center": 5,
             }
             index = mapping.get(index_or_target.lower(), 0)
         else:
@@ -79,6 +91,8 @@ def main(page: ft.Page):
             content_area.content = document_generation_view(page, initial_tab=int(initial_tab or 0))
         elif index == 4:
             content_area.content = settings_view(page)
+        elif index == 5:
+            content_area.content = help_center_view(page, on_navigate=navigate_to)
         page.update()
 
     page.on_navigate = navigate_to
@@ -87,6 +101,11 @@ def main(page: ft.Page):
             page.session.set("navigate_to", navigate_to)
         except Exception:
             pass
+
+    if os.path.exists(logo_path):
+        rail_logo = ft.Image(src=logo_path, width=44, height=44, fit=ft.BoxFit.CONTAIN)
+    else:
+        rail_logo = ft.Icon(ft.Icons.LOCAL_HOSPITAL_ROUNDED, color=PRIMARY_COLOR, size=34)
 
     rail = ft.NavigationRail(
         selected_index=0,
@@ -98,7 +117,7 @@ def main(page: ft.Page):
         leading=ft.Container(
             padding=ft.padding.only(top=16, bottom=16),
             content=ft.Column([
-                ft.Icon(ft.Icons.LOCAL_HOSPITAL_ROUNDED, color=PRIMARY_COLOR, size=34),
+                rail_logo,
                 ft.Text("DFY HRMS", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=4),
         ),
@@ -127,6 +146,11 @@ def main(page: ft.Page):
                 icon=ft.Icons.SETTINGS_OUTLINED,
                 selected_icon=ft.Icons.SETTINGS,
                 label="Settings",
+            ),
+            ft.NavigationRailDestination(
+                icon=ft.Icons.HELP_OUTLINE_ROUNDED,
+                selected_icon=ft.Icons.HELP_ROUNDED,
+                label="Help Center",
             ),
         ],
         on_change=lambda e: navigate_to(e.control.selected_index),

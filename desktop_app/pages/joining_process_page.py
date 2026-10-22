@@ -6,6 +6,7 @@ from services import sheet_processor
 from services import excel_export_service
 from services import email_service
 from services import ai_service
+from services import candidate_outreach_service
 from utils.flet_compat import register_overlay_control
 from utils.ui_theme import (
     modern_card,
@@ -829,7 +830,82 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                         on_click=create_email_handler(),
                     )
 
-                    action_buttons = ft.Row([email_action_btn, archive_btn], spacing=2)
+                    def make_whatsapp_handler(cand_item=c):
+                        def on_copy_whatsapp(e):
+                            msg_text = candidate_outreach_service.generate_whatsapp_outreach_text(cand_item, "selection")
+                            try:
+                                page.set_clipboard(msg_text)
+                            except Exception:
+                                pass
+                            show_message(f"WhatsApp outreach text copied for '{cand_name}'! Ready to paste.", True)
+                        return on_copy_whatsapp
+
+                    whatsapp_btn = ft.IconButton(
+                        icon=ft.Icons.CHAT_ROUNDED,
+                        icon_color=COLOR_SUCCESS,
+                        tooltip="Copy WhatsApp Outreach Text",
+                        on_click=make_whatsapp_handler(),
+                    )
+
+                    def make_slip_handler(cand_item=c):
+                        def on_show_slip(e):
+                            slip_text = candidate_outreach_service.generate_candidate_bio_data_slip(cand_item)
+                            dlg = ft.AlertDialog(
+                                modal=True,
+                                title=ft.Row([
+                                    ft.Icon(ft.Icons.BADGE_ROUNDED, color=PRIMARY_COLOR, size=22),
+                                    ft.Text(f"Bio-Data Slip: {cand_name}", weight=ft.FontWeight.BOLD, size=15),
+                                ], spacing=8),
+                                content=ft.Container(
+                                    width=500,
+                                    content=ft.Column([
+                                        ft.TextField(value=slip_text, multiline=True, min_lines=12, max_lines=16, read_only=True, text_size=11),
+                                    ], tight=True),
+                                ),
+                                actions=[
+                                    ft.TextButton("Copy Slip", on_click=lambda ev: (page.set_clipboard(slip_text), show_message("Copied candidate bio-data slip!", True))),
+                                    ft.ElevatedButton("Close", on_click=lambda ev: page.close(dlg)),
+                                ],
+                                actions_alignment=ft.MainAxisAlignment.END,
+                            )
+                            page.open(dlg)
+                            page.update()
+                        return on_show_slip
+
+                    slip_btn = ft.IconButton(
+                        icon=ft.Icons.PRINT_ROUNDED,
+                        icon_color=COLOR_PRIMARY_LIGHT,
+                        tooltip="View Candidate Bio-Data Slip",
+                        on_click=make_slip_handler(),
+                    )
+
+                    cand_curr_tag = c.get("tag") or ""
+                    TAG_OPTIONS = ["", "Immediate Joiner", "Docs Pending", "On Hold", "Top Priority"]
+                    def make_tag_change_handler(cid=cand_id, cname=cand_name):
+                        def on_tag_change(e):
+                            new_tag = e.control.value
+                            db_manager.update_candidate_tag(cid, new_tag)
+                            show_message(f"Updated tag for '{cname}' to '{new_tag or 'None'}'", True)
+                            refresh_candidates()
+                        return on_tag_change
+
+                    tag_dd = ft.Dropdown(
+                        value=cand_curr_tag if cand_curr_tag in TAG_OPTIONS else "",
+                        options=[
+                            ft.dropdown.Option("", "🏷️ No Tag"),
+                            ft.dropdown.Option("Immediate Joiner", "⚡ Immediate"),
+                            ft.dropdown.Option("Docs Pending", "📄 Docs Pend"),
+                            ft.dropdown.Option("On Hold", "⏸️ On Hold"),
+                            ft.dropdown.Option("Top Priority", "⭐ Priority"),
+                        ],
+                        width=115,
+                        dense=True,
+                        border_radius=8,
+                        border_color=COLOR_CARD_BORDER,
+                        on_change=make_tag_change_handler(),
+                    )
+
+                    action_buttons = ft.Row([whatsapp_btn, email_action_btn, slip_btn, archive_btn], spacing=2)
 
                     rows.append(
                         ft.DataRow(cells=[
@@ -841,6 +917,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                             ft.DataCell(ft.Text(f"₹{cand_salary}" if cand_salary != "N/A" else "N/A", color=COLOR_SUCCESS)),
                             ft.DataCell(ft.Text(cand_loc, color=COLOR_TEXT_SECONDARY)),
                             ft.DataCell(status_dd),
+                            ft.DataCell(tag_dd),
                             ft.DataCell(email_badge),
                             ft.DataCell(action_buttons),
                         ])
@@ -868,6 +945,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                     ft.DataColumn(ft.Text("Salary", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
                     ft.DataColumn(ft.Text("Location", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
                     ft.DataColumn(ft.Text("Status", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
+                    ft.DataColumn(ft.Text("Tag", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
                     ft.DataColumn(ft.Text("Welcome Email", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
                     ft.DataColumn(ft.Text("Actions", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
                 ]
