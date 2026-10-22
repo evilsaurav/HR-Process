@@ -185,6 +185,7 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
     - Never stops if an optional column is missing; extracts all available fields.
     - Automatically cleans float suffixes, extracts valid 10-digit mobiles, and filters out banner rows.
     - Sets department/project context from sheet names.
+    - Preserves per-sheet candidate breakdowns and column metadata for multi-sheet UI previews.
 
     Returns:
       {
@@ -193,6 +194,12 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
           "total_sheet_rows": int,
           "valid_rows": list[dict],
           "sheets_processed": list[str],
+          "sheet_names": list[str],
+          "sheet_counts": dict[str, int],
+          "rows_by_sheet": dict[str, list[dict]],
+          "detected_columns": list[str],
+          "detected_columns_by_sheet": dict[str, list[str]],
+          "mapped_columns_count": int,
           "errors": list[str]
       }
     """
@@ -203,6 +210,12 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
             "total_sheet_rows": 0,
             "valid_rows": [],
             "sheets_processed": [],
+            "sheet_names": [],
+            "sheet_counts": {},
+            "rows_by_sheet": {},
+            "detected_columns": [],
+            "detected_columns_by_sheet": {},
+            "mapped_columns_count": 0,
             "errors": [],
         }
 
@@ -218,6 +231,9 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
     valid_rows = []
     errors = []
     sheets_processed = []
+    rows_by_sheet = {}
+    detected_columns_by_sheet = {}
+    detected_cols_set = set()
 
     # Strategy 1: Excel Multi-Sheet Extraction
     if file_path.lower().endswith((".xlsx", ".xls")):
@@ -237,6 +253,12 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
                     "total_sheet_rows": 0,
                     "valid_rows": [],
                     "sheets_processed": [],
+                    "sheet_names": [],
+                    "sheet_counts": {},
+                    "rows_by_sheet": {},
+                    "detected_columns": [],
+                    "detected_columns_by_sheet": {},
+                    "mapped_columns_count": 0,
                     "errors": [str(e)],
                 }
             wb = None
@@ -259,6 +281,8 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
                 continue
 
             sheets_processed.append(sheet_name)
+            rows_by_sheet[sheet_name] = []
+            detected_columns_by_sheet[sheet_name] = []
             current_col_indices = {}
 
             for r_idx, row in enumerate(raw_rows):
@@ -283,6 +307,8 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
                 # Header detection threshold: Has candidate_name and (mobile or email or matches >= 3)
                 if "candidate_name" in temp_map and ("mobile" in temp_map or "email" in temp_map or matches >= 3):
                     current_col_indices = temp_map
+                    detected_cols_set.update(temp_map.keys())
+                    detected_columns_by_sheet[sheet_name] = list(temp_map.keys())
                     continue
 
                 if not current_col_indices or "candidate_name" not in current_col_indices:
@@ -299,6 +325,7 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
                 cand_data = {
                     "row_index": r_idx + 1,
                     "sheet_name": sheet_name,
+                    "_source_sheet": sheet_name,
                     "department": sheet_name,
                     "source_sheet_name": f"{os.path.basename(file_path)} [{sheet_name}]",
                     "candidate_name": s_name,
@@ -330,12 +357,16 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
 
                 if (has_mob or has_email) and len(s_name) >= 2:
                     valid_rows.append(cand_data)
+                    rows_by_sheet[sheet_name].append(cand_data)
 
     # Strategy 2: CSV / TSV Fallback Extraction
     else:
         try:
             df = read_sheet(file_path)
-            sheets_processed.append(os.path.basename(file_path))
+            csv_sheet_name = os.path.basename(file_path)
+            sheets_processed.append(csv_sheet_name)
+            rows_by_sheet[csv_sheet_name] = []
+            detected_columns_by_sheet[csv_sheet_name] = []
             raw_rows = [list(df.columns)] + df.values.tolist()
             current_col_indices = {}
 
@@ -355,6 +386,8 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
 
                 if "candidate_name" in temp_map and ("mobile" in temp_map or "email" in temp_map or matches >= 3):
                     current_col_indices = temp_map
+                    detected_cols_set.update(temp_map.keys())
+                    detected_columns_by_sheet[csv_sheet_name] = list(temp_map.keys())
                     continue
 
                 if not current_col_indices or "candidate_name" not in current_col_indices:
@@ -369,9 +402,10 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
 
                 cand_data = {
                     "row_index": r_idx + 1,
-                    "sheet_name": os.path.basename(file_path),
+                    "sheet_name": csv_sheet_name,
+                    "_source_sheet": csv_sheet_name,
                     "department": "",
-                    "source_sheet_name": os.path.basename(file_path),
+                    "source_sheet_name": csv_sheet_name,
                     "candidate_name": s_name,
                 }
                 for field in [
@@ -395,6 +429,7 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
                 has_email = bool(cand_data["email"] and "@" in cand_data["email"])
                 if (has_mob or has_email) and len(s_name) >= 2:
                     valid_rows.append(cand_data)
+                    rows_by_sheet[csv_sheet_name].append(cand_data)
         except Exception as ex:
             return {
                 "success": False,
@@ -402,8 +437,16 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
                 "total_sheet_rows": 0,
                 "valid_rows": [],
                 "sheets_processed": [],
+                "sheet_names": [],
+                "sheet_counts": {},
+                "rows_by_sheet": {},
+                "detected_columns": [],
+                "detected_columns_by_sheet": {},
+                "mapped_columns_count": 0,
                 "errors": [str(ex)],
             }
+
+    sheet_counts = {s: len(rows_by_sheet.get(s, [])) for s in sheets_processed}
 
     if not valid_rows:
         return {
@@ -412,6 +455,12 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
             "total_sheet_rows": 0,
             "valid_rows": [],
             "sheets_processed": sheets_processed,
+            "sheet_names": sheets_processed,
+            "sheet_counts": sheet_counts,
+            "rows_by_sheet": rows_by_sheet,
+            "detected_columns": sorted(list(detected_cols_set)),
+            "detected_columns_by_sheet": detected_columns_by_sheet,
+            "mapped_columns_count": len(detected_cols_set),
             "errors": errors,
         }
 
@@ -421,6 +470,12 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
         "total_sheet_rows": len(valid_rows),
         "valid_rows": valid_rows,
         "sheets_processed": sheets_processed,
+        "sheet_names": sheets_processed,
+        "sheet_counts": sheet_counts,
+        "rows_by_sheet": rows_by_sheet,
+        "detected_columns": sorted(list(detected_cols_set)),
+        "detected_columns_by_sheet": detected_columns_by_sheet,
+        "mapped_columns_count": len(detected_cols_set),
         "errors": errors,
     }
 
