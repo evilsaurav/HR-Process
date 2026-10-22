@@ -1,16 +1,16 @@
 """
 Service: hr_report_exporter.py
 Purpose: Generates a polished 1-click Executive HR Daily Briefing report in Excel (.xlsx)
-for Directors, Project Leads, and Auditors.
+for Directors, Project Leads, and Auditors with professional Doctors For You branding.
 """
 
 import os
 import datetime
 from typing import Optional
-import pandas as pd
 from config import DESKTOP_APP_DIR
 from services import dashboard_service
 from services import ai_copilot_service
+from services import excel_export_service
 from database import db_manager
 
 
@@ -57,7 +57,6 @@ def export_daily_executive_summary(target_path: Optional[str] = None) -> str:
         {"Category": "Compliance & Due", "Metric": "Relieving / Experience Certificates Due", "Value": len([c for c in exp_due if not c.get("already_issued")])},
         {"Category": "Compliance & Due", "Metric": "Joined Staff Pending Keka Emp ID Sync", "Value": keka_summary.get("count", 0)},
     ]
-    df_kpi = pd.DataFrame(kpi_data)
 
     # Sheet 2: Action Priorities
     action_rows = []
@@ -70,10 +69,30 @@ def export_daily_executive_summary(target_path: Optional[str] = None) -> str:
             "Action Target Page": str(b.get("action_target", "")).upper(),
             "Urgent": "Yes ⚠️" if b.get("is_urgent") else "No"
         })
-    df_actions = pd.DataFrame(action_rows)
 
-    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
-        df_kpi.to_excel(writer, sheet_name="Executive Overview", index=False)
-        df_actions.to_excel(writer, sheet_name="Action Priorities", index=False)
+    if not action_rows:
+        action_rows.append({
+            "Priority #": 1,
+            "Type": "Operational",
+            "Action Item": "All routine operations are within normal thresholds.",
+            "Guidance": "No critical HR bottlenecks detected.",
+            "Action Target Page": "DASHBOARD",
+            "Urgent": "No"
+        })
 
-    return target_path
+    sheets_data = {
+        "Executive Overview": {
+            "data": kpi_data,
+            "subtitle": "Daily Operations & Pipeline KPI Summary",
+        },
+        "Action Priorities": {
+            "data": action_rows,
+            "subtitle": "Daily Operational Action Items & Directives",
+        },
+    }
+
+    return excel_export_service.export_multisheet_to_excel(
+        sheets_data=sheets_data,
+        output_path=target_path,
+        main_title="DOCTORS FOR YOU — HR & RECRUITMENT OPERATIONS",
+    )

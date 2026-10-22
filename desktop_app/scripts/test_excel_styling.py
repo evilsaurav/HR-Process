@@ -10,6 +10,7 @@ if DESKTOP_APP_DIR not in sys.path:
 sys.stdout.reconfigure(encoding="utf-8")
 
 from services import excel_export_service
+from services import hr_report_exporter
 
 
 def test_excel_export_styling():
@@ -72,5 +73,48 @@ def test_excel_export_styling():
         print("  ✓ All Excel styling verifications passed!")
 
 
+def test_daily_briefing_styling():
+    print("Testing Daily Briefing 2-Sheet Excel Styling...")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        out_path = os.path.join(tmp_dir, "test_daily_briefing.xlsx")
+        result_path = hr_report_exporter.export_daily_executive_summary(target_path=out_path)
+
+        assert os.path.exists(result_path), "Daily briefing Excel file was not created"
+        wb = openpyxl.load_workbook(result_path)
+
+        expected_sheets = ["Executive Overview", "Action Priorities"]
+        for sheet_name in expected_sheets:
+            assert sheet_name in wb.sheetnames, f"Missing expected sheet: {sheet_name}"
+            ws = wb[sheet_name]
+
+            # 1. Row 1 banner containing DOCTORS FOR YOU
+            banner_val = str(ws.cell(row=1, column=1).value or "")
+            assert "DOCTORS FOR YOU" in banner_val, f"{sheet_name}: Row 1 banner missing DOCTORS FOR YOU (got: {banner_val})"
+
+            # 2. Subtitle check
+            sub_val = str(ws.cell(row=3, column=1).value or "")
+            if sheet_name == "Executive Overview":
+                assert "Daily Operations & Pipeline KPI Summary" in sub_val, f"Executive Overview subtitle missing: {sub_val}"
+            elif sheet_name == "Action Priorities":
+                assert "Daily Operational Action Items & Directives" in sub_val, f"Action Priorities subtitle missing: {sub_val}"
+
+            # 3. Freeze panes set
+            assert ws.freeze_panes in ["A6", "A5"], f"{sheet_name}: Unexpected freeze panes: {ws.freeze_panes}"
+
+            # 4. Auto-filter set
+            assert ws.auto_filter.ref is not None, f"{sheet_name}: Auto-filter not set on table"
+
+            # 5. Solid fill header row
+            header_cell = ws.cell(row=5, column=1)
+            assert header_cell.fill.fill_type == "solid", f"{sheet_name}: Header cell should have solid fill"
+            assert header_cell.fill.start_color.rgb in ["FF1E3A8A", "1E3A8A", "FF0A2540", "0A2540"], f"{sheet_name}: Unexpected header color: {header_cell.fill.start_color.rgb}"
+
+            # 6. Data rows present
+            assert ws.cell(row=6, column=1).value is not None, f"{sheet_name}: Row 6 should contain data"
+
+    print("  ✓ All Daily Briefing styling verifications passed!")
+
+
 if __name__ == "__main__":
     test_excel_export_styling()
+    test_daily_briefing_styling()

@@ -7,6 +7,7 @@ Features:
 - Alternating zebra striping (#FFFFFF and #F8FAFC)
 - Smart column formatting (Indian Currency ₹ #,##0, DD-MMM-YYYY dates, center/left alignments)
 - Content-aware column auto-fitting (min 14, max 55)
+- Multi-sheet workbook support with customized per-sheet banners & subtitles
 """
 
 import os
@@ -74,7 +75,7 @@ def _get_column_type(col_name: str) -> str:
     center_keywords = (
         "mobile", "phone", "contact", "status", "id", "code",
         "gender", "blood group", "state", "pincode", "pin code",
-        "pan", "aadhaar", "uan", "emp id"
+        "pan", "aadhaar", "uan", "emp id", "priority", "urgent", "type"
     )
 
     if any(k in name for k in currency_keywords):
@@ -86,38 +87,23 @@ def _get_column_type(col_name: str) -> str:
     return "text"
 
 
-def export_to_excel(data: List[Dict[str, Any]], output_path: str, sheet_name: str = "Report") -> str:
+def populate_and_style_worksheet(
+    ws,
+    headers: List[str],
+    rows: List[List[Any]],
+    title: str = "DOCTORS FOR YOU — HR & RECRUITMENT OPERATIONS",
+    subtitle: str = ""
+) -> None:
     """
-    Exports a list of dictionaries to an executive-styled Excel (.xlsx) workbook.
+    Populates and styles an individual openpyxl Worksheet with executive DFY branding.
 
     Arguments:
-        data: List of dictionaries representing table rows.
-        output_path: Absolute or relative destination file path.
-        sheet_name: Name of the worksheet tab.
-
-    Returns:
-        output_path on success.
+        ws: openpyxl Worksheet object
+        headers: List of column header names
+        rows: List of row data lists
+        title: Header banner text
+        subtitle: Subtitle / report metadata text
     """
-    # Ensure parent directory exists
-    parent_dir = os.path.dirname(os.path.abspath(output_path))
-    if parent_dir:
-        os.makedirs(parent_dir, exist_ok=True)
-
-    # Normalize data through pandas DataFrame
-    df = pd.DataFrame(data if data else [])
-    df = df.where(pd.notnull(df), None)
-
-    if df.empty and not df.columns.tolist():
-        headers = ["Status"]
-        rows = [["No records to display"]]
-    else:
-        headers = [str(c) for c in df.columns.tolist()]
-        rows = df.values.tolist()
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = sheet_name[:31]  # Excel tab name max 31 characters
-
     if ws.views.sheetView:
         ws.views.sheetView[0].showGridLines = True
 
@@ -139,7 +125,7 @@ def export_to_excel(data: List[Dict[str, Any]], output_path: str, sheet_name: st
             cell.fill = banner_fill
 
     title_cell = ws.cell(row=1, column=1)
-    title_cell.value = "DOCTORS FOR YOU — HR & RECRUITMENT OPERATIONS"
+    title_cell.value = title or "DOCTORS FOR YOU — HR & RECRUITMENT OPERATIONS"
     title_cell.font = banner_font
     title_cell.alignment = banner_align
 
@@ -147,9 +133,16 @@ def export_to_excel(data: List[Dict[str, Any]], output_path: str, sheet_name: st
     # 2. Report Subtitle / Metadata (Row 3)
     # ==========================================
     now_str = datetime.now().strftime("%d-%b-%Y %I:%M %p")
-    subtitle_text = f"Report: {sheet_name} | Generated: {now_str} | Confidential"
-    ws.row_dimensions[3].height = 18
+    if subtitle:
+        if "Generated:" not in subtitle:
+            subtitle_text = f"{subtitle} | Generated: {now_str} | Confidential"
+        else:
+            subtitle_text = subtitle
+    else:
+        sheet_title = getattr(ws, "title", "Report")
+        subtitle_text = f"Report: {sheet_title} | Generated: {now_str} | Confidential"
 
+    ws.row_dimensions[3].height = 18
     if num_cols > 1:
         ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=num_cols)
 
@@ -218,7 +211,7 @@ def export_to_excel(data: List[Dict[str, Any]], output_path: str, sheet_name: st
             cell.fill = row_fill
             cell.border = cell_border
 
-            ctype = col_types[col_idx - 1]
+            ctype = col_types[col_idx - 1] if col_idx - 1 < len(col_types) else "text"
 
             if ctype == "currency":
                 parsed_cur = _try_parse_currency(val)
@@ -261,7 +254,7 @@ def export_to_excel(data: List[Dict[str, Any]], output_path: str, sheet_name: st
             if c_val is not None:
                 if isinstance(c_val, (date, datetime)):
                     val_str = c_val.strftime("%d-%b-%Y")
-                elif isinstance(c_val, (int, float)) and col_types[col_idx - 1] == "currency":
+                elif isinstance(c_val, (int, float)) and col_idx - 1 < len(col_types) and col_types[col_idx - 1] == "currency":
                     val_str = f"₹ {c_val:,.0f}"
                 else:
                     val_str = str(c_val)
@@ -269,6 +262,120 @@ def export_to_excel(data: List[Dict[str, Any]], output_path: str, sheet_name: st
 
         calculated_width = max(max_len + 4, 14)
         ws.column_dimensions[col_letter].width = min(calculated_width, 55)
+
+
+def export_to_excel(data: List[Dict[str, Any]], output_path: str, sheet_name: str = "Report") -> str:
+    """
+    Exports a list of dictionaries to an executive-styled Excel (.xlsx) workbook.
+
+    Arguments:
+        data: List of dictionaries representing table rows.
+        output_path: Absolute or relative destination file path.
+        sheet_name: Name of the worksheet tab.
+
+    Returns:
+        output_path on success.
+    """
+    parent_dir = os.path.dirname(os.path.abspath(output_path))
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    df = pd.DataFrame(data if data else [])
+    df = df.where(pd.notnull(df), None)
+
+    if df.empty and not df.columns.tolist():
+        headers = ["Status"]
+        rows = [["No records to display"]]
+    else:
+        headers = [str(c) for c in df.columns.tolist()]
+        rows = df.values.tolist()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name[:31]
+
+    populate_and_style_worksheet(
+        ws=ws,
+        headers=headers,
+        rows=rows,
+        title="DOCTORS FOR YOU — HR & RECRUITMENT OPERATIONS",
+        subtitle=f"Report: {sheet_name}"
+    )
+
+    wb.save(output_path)
+    wb.close()
+    return output_path
+
+
+def export_multisheet_to_excel(
+    sheets_data: Dict[str, Any],
+    output_path: str,
+    main_title: str = "DOCTORS FOR YOU — HR & RECRUITMENT OPERATIONS",
+    sheet_subtitles: Optional[Dict[str, str]] = None
+) -> str:
+    """
+    Exports multiple sheets of data into a single executive-styled Excel workbook.
+
+    Arguments:
+        sheets_data: Dictionary mapping sheet names to data. Data can be:
+                     - List of dicts: [{"col1": val, ...}, ...]
+                     - Dict with {"data": [...], "subtitle": "...", "title": "..."}
+                     - pandas DataFrame
+                     - Dict with {"headers": [...], "rows": [...]}
+        output_path: Destination file path.
+        main_title: Organization header banner title.
+        sheet_subtitles: Optional mapping of sheet_name -> subtitle string.
+
+    Returns:
+        output_path on success.
+    """
+    parent_dir = os.path.dirname(os.path.abspath(output_path))
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    wb = Workbook()
+    first_sheet = True
+
+    for sheet_name, sheet_content in sheets_data.items():
+        clean_sheet_name = str(sheet_name)[:31]
+        if first_sheet:
+            ws = wb.active
+            ws.title = clean_sheet_name
+            first_sheet = False
+        else:
+            ws = wb.create_sheet(title=clean_sheet_name)
+
+        title = main_title
+        subtitle = (sheet_subtitles or {}).get(sheet_name, "")
+
+        data = sheet_content
+        if isinstance(sheet_content, dict):
+            if "headers" in sheet_content and "rows" in sheet_content:
+                headers = [str(h) for h in sheet_content["headers"]]
+                rows = sheet_content["rows"]
+                title = sheet_content.get("title", title)
+                subtitle = sheet_content.get("subtitle", subtitle)
+                populate_and_style_worksheet(ws, headers, rows, title=title, subtitle=subtitle)
+                continue
+            elif "data" in sheet_content:
+                data = sheet_content["data"]
+                title = sheet_content.get("title", title)
+                subtitle = sheet_content.get("subtitle", subtitle)
+
+        if isinstance(data, pd.DataFrame):
+            df = data.where(pd.notnull(data), None)
+        else:
+            df = pd.DataFrame(data if data else [])
+            df = df.where(pd.notnull(df), None)
+
+        if df.empty and not df.columns.tolist():
+            headers = ["Status"]
+            rows = [["No records to display"]]
+        else:
+            headers = [str(c) for c in df.columns.tolist()]
+            rows = df.values.tolist()
+
+        populate_and_style_worksheet(ws, headers, rows, title=title, subtitle=subtitle)
 
     wb.save(output_path)
     wb.close()
