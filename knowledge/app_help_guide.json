@@ -1,0 +1,73 @@
+[
+  {
+    "id": "excel_upload",
+    "icon": "upload_file_rounded",
+    "badge": "Flow 1",
+    "title": "Excel Interview Sheet Upload & Duplicate Safety",
+    "tagline": "Multi-sheet interview charts ko bina kisi error ke upload karein",
+    "steps": [
+      "1. Left menu se **Joining Process** page par jayein.",
+      "2. **'Choose Spreadsheet'** button dabakar apni Interview Excel file (.xlsx) select karein.",
+      "3. System file ke sabhi sheets (e.g. UP, Bihar, Maharashtra) aur batches ko automatically scan kar leta hai.",
+      "4. Agar koi candidate dubara upload hota hai, to system **Duplicate Review Screen** dikhayega: wahan aap **'Keep Existing'** (purana record safe rakhein) ya **'Replace'** chun sakte hain."
+    ],
+    "pro_tip": "💡 Tip: Agar Excel me koi optional column miss ho, to bhi system rukta nahi hai aur baaki saara data process kar leta hai."
+  },
+  {
+    "id": "welcome_emails",
+    "icon": "mark_email_read_rounded",
+    "badge": "Flow 2",
+    "title": "Review & Dispatch Welcome Emails",
+    "tagline": "Selected candidates ko 1-click me personalized selection confirmation bhejein",
+    "steps": [
+      "1. Joining Process page me **'Selected'** filter tab par click karein.",
+      "2. Jin candidates ko email bhejna hai, unke aage wale checkboxes ko tick karein.",
+      "3. Top toolbar par **'✉️ Review & Send Welcome Emails'** button dabayein.",
+      "4. Preview modal me email subject aur body check karein (Candidate ka naam, post aur location automatically personalize ho jate hain), fir **'Send'** dabayein."
+    ],
+    "pro_tip": "💡 Tip: Welcome email bhejne ke baad candidate ke aage green **'Sent'** badge lag jata hai."
+  },
+  {
+    "id": "document_staging",
+    "icon": "description_rounded",
+    "badge": "Flow 3",
+    "title": "Smart Document Generator & Final Go",
+    "tagline": "Offer Letters, Increments aur Relieving Certificates bina serial number kharab kiye draft karein",
+    "steps": [
+      "1. Left menu se **Document Generator** page par jayein.",
+      "2. **Tab 1 (Smart Detector)**: System automatically pehchan leta hai kis staff ko konsa letter chahiye (Offer, Extension, Increment, Relieving). Candidate chunein aur **'Draft to Staging'** dabayein.",
+      "3. **Tab 2 (Staging & Final Review)**: Yahan draft document ko preview karein, zaroorat ho to salary ya posting location turant inline edit karein (turant re-generate ho jata hai).",
+      "4. Sab theek lagne par **'🚀 Final Go: Dispatch Selected'** dabayein. Official sequence number usi waqt consume hota hai aur email dispatch ho jata hai."
+    ],
+    "pro_tip": "💡 Tip: Draft banate waqt official reference number consume nahi hota, isliye sequencing hamesha clean rehti hai."
+  },
+  {
+    "id": "keka_sync",
+    "icon": "sync_rounded",
+    "badge": "Flow 4",
+    "title": "Keka HRMS Sync & Employee Number Assignment",
+    "tagline": "Joined employees ko unka official Keka Employee ID assign karein",
+    "steps": [
+      "1. Keka portal se employee master export sheet download karein.",
+      "2. Left menu se **Keka Sync** page par jayein aur **'Choose Keka Sheet'** dabayein.",
+      "3. System duplicate check karega aur agar pehle se employee exist karta hai to safe update option dega.",
+      "4. Sync complete hote hi sabhi joined staff ke profile me Keka ID aur statutory details map ho jayenge."
+    ],
+    "pro_tip": "💡 Tip: Dashboard par Keka sync ka live green pill dikhta hai jab sabhi joined staff synced hote hain."
+  },
+  {
+    "id": "dfy_policy",
+    "icon": "menu_book_rounded",
+    "badge": "DFY Rules",
+    "title": "Official DFY HR Manual (Updated 2025) Guidelines",
+    "tagline": "DFY ke sabhi 10 Articles ka authentic operational guide",
+    "steps": [
+      "• **Working Hours (Art. 4)**: Mon to Sat subah 9:30 AM se shaam 5:30 PM (48 hrs/week).",
+      "• **Probation (Art. 2)**: Har naye employee ka probation review hona mandatory hai.",
+      "• **Leaves (Art. 4)**: Casual Leave aur Sick Leave supervisor ki approval se milti hain. Maternity leave female staff ke liye uplabdh hai.",
+      "• **Notice Period (Art. 5)**: Resignation par notice period serve karna aur no-dues clear hone par hi Relieving Certificate issue hota hai.",
+      "• **Medical Insurance (Art. 6)**: Eligible employees ko Group Health Insurance cover milta hai."
+    ],
+    "pro_tip": "💡 Tip: Dashboard par search bar me kisi bhi rule ke bare me type karein, system instant reference dega."
+  }
+]

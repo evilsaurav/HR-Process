@@ -1,119 +1,154 @@
-# Doctors For You (DFY) — HR Operations Platform & Smart Document Staging Pipeline
+# Doctors For You (DFY) — HR Operations Platform
 
-A production-ready, offline-first Desktop HRMS Application built with Python and Flet for managing candidate interviews, Keka HRMS synchronization, smart document generation (Offer Letters, Extension Letters, Increment Letters, Experience & Relieving Certificates, Termination Letters), human-in-the-loop review staging, and automated email dispatch.
+An enterprise-ready, offline-first Desktop HRMS Application built with Python and [Flet](https://flet.dev/) for managing candidate recruitment pipelines, Keka HRMS synchronization, automated document generation (Offer Letters, Extension Letters, Increment Letters, Experience & Relieving Certificates, Termination Letters), human-in-the-loop review staging, and automated email dispatch.
 
 ---
 
 ## 🚀 Quick Start Guide (For Any Windows Computer)
 
-You do **NOT** need to open a command prompt or type commands manually. Everything is automated via 1-click batch scripts.
+You do **NOT** need technical knowledge or to type commands into a command prompt. The application handles virtual environments, dependencies, and execution with a single double-click.
 
-### Step 1: Install Python (If not already installed)
-1. Download Python 3.10 or higher from: https://www.python.org/downloads/
-2. **IMPORTANT**: During installation on the very first screen, check the box:
+### Step 1: Install Python (If Not Already Installed)
+1. Download Python 3.10, 3.11, or 3.12 from: **[https://www.python.org/downloads/](https://www.python.org/downloads/)**
+2. **IMPORTANT**: On the very first screen of the Python installer, check the box:  
    `☑ Add python.exe to PATH`
 3. Click **Install Now**.
 
-### Step 2: Install Required Libraries (One-Time Setup)
-- Double-click on:
-  ```
-  Install_Dependencies.bat
-  ```
-  *(This automatically installs Flet, Pandas, python-docx, PyWin32, OpenPyXL, and Cryptography).*
-
-### Step 3: Run the Application
-- Double-click on:
+### Step 2: Launch the Application (1-Click)
+- Simply double-click on:
   ```
   Launch_DFY_HRMS.bat
   ```
-- **Optional**: To place a shortcut directly on your Windows Desktop, open Command Prompt in this folder and run:
+- **What happens behind the scenes:**
+  - It automatically checks if Python is available.
+  - If any required packages (`flet`, `pandas`, `openpyxl`, `python-docx`, `pywin32`, etc.) are missing, it installs them automatically from `requirements.txt`.
+  - It launches the modern desktop application window immediately.
+
+### Step 3 (Optional): Create a Windows Desktop Shortcut
+To place a permanent shortcut directly on your Windows Desktop:
+- Open a Command Prompt or Terminal in this folder and run:
   ```cmd
   Launch_DFY_HRMS.bat --create-shortcut
   ```
+- A shortcut named **"DFY HR Operations Platform"** will instantly appear on your Windows Desktop.
 
 ---
 
-## 📦 How to Share / Zip This App to Another System
+## 📦 How to Share & Test This App on Another Computer
 
-### Option A: Zip the Entire Project Folder (Recommended)
-Simply right-click the project folder `Suraj HR Project` ➔ **Send to** ➔ **Compressed (zipped) folder**.
-- Send that `.zip` file to any other computer.
-- Unzip it anywhere (e.g. `C:\DFY_HRMS` or Desktop).
-- Double-click `Install_Dependencies.bat` (first time only) then double-click `Launch_DFY_HRMS.bat`.
-- Everything works out of the box with all databases, logos, and templates included!
-
-### Option B: Zip Only the `desktop_app` Folder
-We have made `desktop_app` **100% self-contained**:
-- Inside `desktop_app`, it now contains:
-  - `Launch_DFY_HRMS.bat` (1-click desktop runner)
-  - `Install_Dependencies.bat` (1-click dependency installer)
-  - `requirements.txt` (exact package list)
-  - `data/` (`hrms.db` and encryption keys)
-  - `assets/` (organization logos)
-  - `templates/` (all Word document templates for Offer, Extension, Increment, Termination, and Certificates)
-  - `pages/` & `services/` (complete application logic)
-- If you zip only `desktop_app`, the recipient simply extracts it and runs `Launch_DFY_HRMS.bat`.
+This `desktop_app` folder is **100% self-contained and portable**:
+- It contains its own local SQLite database (`data/hrms.db`), encryption keys (`data/secret.key`), company assets (`assets/dfy_logo112.png`), complete Word document templates (`templates/`), and offline knowledge base (`knowledge/`).
+- **To test on another computer:**
+  1. Right-click the `desktop_app` folder ➔ **Send to** ➔ **Compressed (zipped) folder** (or use 7-Zip / WinRAR).
+  2. Send the `.zip` file via email, Google Drive, or USB drive to the testing machine.
+  3. Extract the `.zip` anywhere on the new machine (e.g. `C:\Users\<Name>\Desktop\DFY_HRMS`).
+  4. Double-click `Launch_DFY_HRMS.bat`.
+  5. The app will launch smoothly without needing any parent repository files!
 
 ---
 
-## 🛠️ Key Modules & Capabilities
+## 🌟 Key Features & Workflow Guide
 
-### 1. Executive Dashboard (`pages/dashboard_page.py`)
-- Real-time command center showing live counts:
-  - **🎉 Pending Welcome Emails**: Count of selected candidates needing welcome emails. Click navigates directly to the review queue.
-  - **🔍 Letters to Generate**: Staff detected from Keka sheets needing official letters. Click opens Smart Detector.
-  - **🚀 Staged Ready for Final Go**: Letters generated and waiting in the staging quality gate. Click opens Staging Review Queue.
-  - **👥 In Pipeline / Interviews**: Active applicants across the interview lifecycle.
-- Live operations activity log showing recent email dispatches and generated documents.
+### 1. Executive Bento Dashboard (`pages/dashboard_page.py`)
+- Real-time command center displaying 4 live, clickable action cards:
+  - **🎉 Pending Welcome Emails**: Count of selected interview candidates awaiting official welcome emails. Clicking navigates directly to the review queue.
+  - **🔍 Letters to Generate**: Staff members detected from Keka sheets needing official letters. Clicking opens the Smart Detector.
+  - **🚀 Staged Ready for Final Go**: Letters generated and waiting in the human-in-the-loop review queue. Clicking opens the Staging Hub.
+  - **👥 Total in Pipeline**: Active candidates currently in the screening and interview process.
+- **Operations Activity Feed**: Real-time log of recent document dispatches, candidate status changes, and sync events.
 
-### 2. Candidate Joining Process (`pages/joining_process_page.py`)
-- Ingest candidate screening sheets (`.xlsx` or `.csv`).
-- Handles candidates who interview 2–5 times across different rounds/roles with duplicate detection warnings.
-- Filter tab: **`🎉 Selected (Pending Welcome Email) [N]`** displays selected candidates.
-- Click **`✉️ Review & Send Welcome Emails`** to preview personalized congratulatory emails, edit text if needed, and dispatch in bulk.
+### 2. Candidate Joining Process & Multi-Sheet Preview (`pages/joining_process_page.py`)
+- **Excel & CSV Upload**: Ingest multi-sheet interview charts (e.g., `PPSA INTERVIEW CHART.xlsx`).
+- **Inline Multi-Sheet Visual Inspection**:
+  - Interactive tab switcher across workbook sheets (e.g., *Phase 1*, *Phase 2*, *Interview Round 2*).
+  - KPI metrics strip showing Candidate Count, Selected, and In-Process tallies.
+  - 10-row visual preview data table.
+  - Post-ingestion action cards for instant next steps.
+- **Multi-Round Interview Tracking**: Candidates who interview 2–5 times across different rounds/roles are tracked with interview history without creating duplicate employee records.
+- **Welcome Email Review & Bulk Dispatch**:
+  - Filter: `🎉 Selected (Pending Welcome Email) [N]`.
+  - Click `✉️ Review & Send Welcome Emails` to preview personalized congratulations emails, edit subject or body text, and dispatch in bulk with a progress bar.
 
-### 3. Keka Master Synchronization & Duplicate Protection (`pages/keka_sync_page.py`)
-- Ingest 74-column Keka Master Sheets (`.xlsx`, `.csv`).
-- **Auto-Offset Detection**: Automatically detects report headers even if Keka inserts company banners on Row 0 and Row 1.
+### 3. Keka Master Sync & Zero-Duplicate Protection (`pages/keka_sync_page.py`)
+- **74-Column Keka Ingestion**: Supports full Keka HRMS employee master exports (`.xlsx`, `.csv`).
+- **Dynamic Header Offset Detection**: Automatically identifies header rows even if Keka inserts multi-row corporate banners at the top of the worksheet.
 - **Zero Duplicate Employee Guarantee**:
   - Employee IDs are strictly unique per staff member.
-  - **Pre-Sync Warning & Resolution Dialog**: If the same employee ID or a sheet re-upload is detected, the system gives a clear warning showing field-by-field differences (e.g. Salary, Designation) and asks:
-    - `🔄 Update Existing with Sheet Data`: Updates the existing database record cleanly.
-    - `🛡️ Keep Database Records (Skip Sheet Duplicates)`: Preserves current database records and only imports new staff.
+  - **Pre-Sync Warning & Resolution Dialog**: If duplicate employee numbers or a sheet re-upload is detected, the system displays an interactive side-by-side comparison (Current DB vs Incoming Sheet) and offers two clear choices:
+    1. `🔄 Update Existing with Sheet Data`: Updates designation, salary, or dates while preserving employee history.
+    2. `🛡️ Keep Database Records (Skip Sheet Duplicates)`: Preserves current database records and only imports brand-new employees.
 
 ### 4. Smart Document Pipeline & Staging Hub (`pages/document_generation_page.py`)
 - **Tab 1: 🔍 Smart Detection & Generator**
-  - Evaluates employee status against Keka data:
-    - *Joined / Active without prior offer* ➔ **Offer Letter**
+  - Analyzes employee records against HR business rules to classify required documents:
+    - *Active / Joined without prior offer* ➔ **Offer Letter**
     - *Extension of Service Till present* ➔ **Extension Letter**
     - *Salary revision detected* ➔ **Increment Letter**
     - *Exit Date / Resignation present* ➔ **Experience & Relieving Certificate**
-    - *Termination reason present* ➔ **Termination Letter**
-  - Inline HR dropdown override for any document type.
-  - Generates drafts into the staging queue with non-consuming sequence numbers.
-- **Tab 2: 📋 Staging & Final Review Hub (Human-in-the-Loop Quality Gate)**
-  - Review all generated drafts before anything is sent.
+    - *Disciplinary or termination recorded* ➔ **Termination Letter**
+  - Allows HR users to override suggested letter types via an inline dropdown.
+  - Generates draft letters into the staging queue **without consuming official reference sequence numbers**.
+- **Tab 2: 📋 Staging & Final Review Hub (Quality Gate)**
   - **👁️ Preview**: 1-click preview in Microsoft Word or default PDF viewer.
-  - **✏️ Fix Details**: Edit name, salary, dates, or designation ➔ **instantly regenerates the document** and updates the preview.
-  - **Format Toggle**: Select `PDF` (default) or `DOCX` per candidate.
-  - **`[ 🚀 Final Go: Dispatch Selected ]`**: Atomically consumes official reference numbers sequentially, re-stamps documents, sends emails with attachments, and records permanent audit logs.
+  - **✏️ Fix Details**: Edit employee name, salary, dates, or designation ➔ **instantly regenerates the document** and updates the preview.
+  - **Format Selector**: Choose `PDF` (default) or `DOCX` per candidate.
+  - **`[ 🚀 Final Go: Dispatch Selected ]`**:
+    - Atomically increments and commits official reference numbers sequentially.
+    - Re-stamps documents with permanent reference numbers.
+    - Converts to PDF (via Microsoft Word COM automation).
+    - Dispatches email with the document attached via encrypted SMTP / Gmail API.
+    - Writes permanent audit log records.
 - **Tab 3: ✍️ Manual One-Off Generator**
-  - Manually select any candidate and generate custom letters on demand.
+  - Select any employee and generate single customized letters on demand.
 
-### 5. Settings & Configurations (`pages/settings_page.py`)
-- **SMTP Email Configuration**: Configure company email (Gmail, Outlook, DFY server) with encrypted password storage.
-- **AI API Keys**: Optional integration for Gemini, Groq, NVIDIA, OpenAI for smart letter summaries (works 100% offline if no API key is provided).
-- **Reference Number Sequence**: Configure organization reference format (e.g., `DFY/HR/{YYYY}/{SEQ}`) and current counter.
+### 5. Professional Excel Styling & Native OS File Launcher
+- **Executive OpenPyXL Styling Engine**:
+  - All Excel exports (Candidate lists, Daily Briefings, Unmatched reports) feature DFY Corporate Navy (`#0B5ED7`) headers with bold white text.
+  - Subtle ice-blue zebra striping (`#F1F5F9`) for easy reading.
+  - Indian Rupee currency formatting (`₹#,##0`) on compensation columns.
+  - Auto-fitted column widths preventing cell truncation (`###`).
+- **1-Click Native OS File & Folder Launcher**:
+  - Every export displays an interactive completion modal with:
+    - `📂 Open File`: Instantly opens the file in Excel, Word, or Adobe Reader.
+    - `📁 Open Folder`: Opens Windows Explorer with the generated file highlighted.
+
+### 6. Help Center & Offline Hinglish AI Copilot (`pages/help_page.py`)
+- **Interactive Knowledge Center**: Searchable step-by-step guides for all platform workflows.
+- **100% Offline Hinglish HR Copilot**:
+  - Built-in knowledge base containing all 10 Articles of the official **Doctors For You (DFY) HR Policy Manual** (Attendance, Leave Policy, Code of Conduct, Travel Reimbursement, Disciplinary Policy, etc.).
+  - Works with zero internet and without requiring third-party AI API keys.
+  - HR staff can type questions in English or Hinglish (e.g., *"Casual leave kitni milti hai?"*, *"Travel allowance claim kaise karein?"*) and get instant, accurate answers citing policy articles.
 
 ---
 
-## 📋 System Requirements
-- **Operating System**: Windows 10 or Windows 11 (64-bit)
-- **Python**: Version 3.10, 3.11, 3.12, or higher
-- **Microsoft Word / Office** (Recommended for automated Word-to-PDF conversion via Word COM automation; if Word is not installed, the system automatically falls back to `.docx` delivery without crashing).
+## 🛠️ System Requirements & Hardware Support
+
+| Component | Minimum Requirement | Recommended |
+|-----------|---------------------|-------------|
+| **OS** | Windows 10 (64-bit) | Windows 11 (64-bit) |
+| **Python** | Python 3.10+ | Python 3.11 or 3.12 |
+| **Microsoft Office** | Optional (saves as `.docx`) | Microsoft Word 2016+ (enables automated Word-to-PDF conversion) |
+| **RAM** | 4 GB | 8 GB or higher |
+| **Disk Space** | 250 MB free | 500 MB free |
 
 ---
 
-## 📞 Support & Maintenance
+## 🔧 Troubleshooting & FAQ
+
+#### Q: The batch file closes immediately or shows "Python was not found".
+**A:** Python is either not installed or was not added to your system PATH. Re-run the Python installer, select **Modify**, and make sure **Add Python to PATH** is checked.
+
+#### Q: How does automated PDF conversion work?
+**A:** The application uses Microsoft Word COM automation (`win32com.client`) to convert Word templates to high-fidelity PDF documents. If Microsoft Word is not installed on the machine, the application gracefully saves and emails the `.docx` file instead without crashing.
+
+#### Q: Where are generated files and logs stored?
+**A:** 
+- Generated documents: `desktop_app/output/generated_documents/`
+- Exported Excel reports: `desktop_app/output/`
+- Application logs: `desktop_app/logs/hrms_app.log`
+
+---
+
+## 📞 Support & Contacts
 Developed for **Doctors For You (DFY)** HR Operations.  
 Maintained by the HR Technical Automation Team.

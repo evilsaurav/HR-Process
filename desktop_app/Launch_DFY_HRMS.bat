@@ -47,6 +47,12 @@ if exist "%~dp0..\.venv\Scripts\python.exe" (
     goto :python_found
 )
 
+if exist "%~dp0..\venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0..\venv\Scripts\python.exe"
+    echo [OK] Using parent virtual environment venv
+    goto :python_found
+)
+
 python --version >nul 2>&1
 if !errorlevel! equ 0 (
     set "PYTHON_EXE=python"
@@ -72,7 +78,7 @@ if "%PYTHON_EXE%"=="" (
     echo What you can do:
     echo 1. Install Python from https://www.python.org/downloads/
     echo 2. During installation, make sure to check "Add python.exe to PATH"
-    echo 3. Or run Install_Dependencies.bat after installing Python.
+    echo 3. Double-click Launch_DFY_HRMS.bat again.
     echo.
     echo If you need assistance, please contact the IT/HR technical team.
     echo ===============================================================================
@@ -81,10 +87,35 @@ if "%PYTHON_EXE%"=="" (
     exit /b 1
 )
 
-:: 2. Configure environment variables
+:: 2. Check and auto-install missing dependencies
+echo [INFO] Checking application dependencies...
+"%PYTHON_EXE%" -c "import flet, pandas, openpyxl, docx, num2words, cryptography, requests" >nul 2>&1
+if !errorlevel! neq 0 (
+    echo.
+    echo [NOTICE] Required packages are missing in this Python environment.
+    echo [INFO] Installing required dependencies from requirements.txt...
+    echo [INFO] This only needs to happen once. Please wait...
+    echo.
+    "%PYTHON_EXE%" -m pip install -r "%~dp0requirements.txt"
+    if !errorlevel! neq 0 (
+        echo.
+        echo ===============================================================================
+        echo [ERROR] Failed to install dependencies automatically.
+        echo Please ensure you have internet access and run:
+        echo   "%PYTHON_EXE%" -m pip install -r "%~dp0requirements.txt"
+        echo ===============================================================================
+        echo.
+        if not defined NON_INTERACTIVE pause
+        exit /b 1
+    )
+    echo [OK] All dependencies successfully installed!
+    echo.
+)
+
+:: 3. Configure environment variables
 set "PYTHONPATH=%~dp0;%PYTHONPATH%"
 
-:: 3. Launch Desktop Application
+:: 4. Launch Desktop Application
 echo [INFO] Launching Doctors For You HR Operations Platform...
 echo.
 "%PYTHON_EXE%" "%~dp0main.py" %*

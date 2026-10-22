@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableDelayedExpansion
 title Install Dependencies - Doctors For You HRMS
 cd /d "%~dp0"
 
@@ -7,27 +8,67 @@ echo                Doctors For You - HR Operations Platform
 echo                       Dependencies Installer
 echo ===============================================================================
 echo.
-echo Installing all required packages from requirements.txt...
-echo.
+
+set "PYTHON_EXE="
+
+if exist "%~dp0.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
+    echo [OK] Using virtual environment .venv
+    goto :python_found
+)
+
+if exist "%~dp0venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
+    echo [OK] Using virtual environment venv
+    goto :python_found
+)
+
+if exist "%~dp0..\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0..\.venv\Scripts\python.exe"
+    echo [OK] Using parent virtual environment .venv
+    goto :python_found
+)
+
+if exist "%~dp0..\venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0..\venv\Scripts\python.exe"
+    echo [OK] Using parent virtual environment venv
+    goto :python_found
+)
 
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Python is not installed or not in your system PATH!
+if !errorlevel! equ 0 (
+    set "PYTHON_EXE=python"
+    echo [OK] Using system Python from PATH
+    goto :python_found
+)
+
+py --version >nul 2>&1
+if !errorlevel! equ 0 (
+    set "PYTHON_EXE=py"
+    echo [OK] Using Windows Python Launcher py
+    goto :python_found
+)
+
+:python_found
+if "%PYTHON_EXE%"=="" (
+    echo ===============================================================================
+    echo [ERROR] Python was not found on your system!
+    echo ===============================================================================
+    echo.
     echo Please install Python 3.10+ from https://www.python.org/downloads/
-    echo Make sure to check "Add python.exe to PATH" during installation.
+    echo During installation, be sure to check "Add python.exe to PATH".
     echo.
     pause
     exit /b 1
 )
 
-echo [1/2] Upgrading pip...
-python -m pip install --upgrade pip
-
 echo.
-echo [2/2] Installing libraries (flet, python-docx, pandas, openpyxl, pywin32, etc.)...
-python -m pip install -r "%~dp0requirements.txt"
+echo Installing all required packages from requirements.txt...
+echo.
 
-if %errorlevel% neq 0 (
+"%PYTHON_EXE%" -m pip install -r "%~dp0requirements.txt"
+
+if !errorlevel! neq 0 (
     echo.
     echo ===============================================================================
     echo [ERROR] Package installation failed. Please check your internet connection.
