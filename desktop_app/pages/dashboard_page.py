@@ -409,6 +409,7 @@ def dashboard_view(page: ft.Page, on_navigate: Optional[Callable] = None):
         try:
             out_file = hr_report_exporter.export_daily_executive_summary()
             show_message(f"Daily Briefing Report generated: {os.path.basename(out_file)}!", True)
+            ui_theme.show_export_success_dialog(page, out_file, report_title="Executive Daily Briefing")
         except Exception as ex:
             show_message(f"Export error: {ex}", False)
 
@@ -511,6 +512,7 @@ def dashboard_view(page: ft.Page, on_navigate: Optional[Callable] = None):
         ]
         excel_export_service.export_to_excel(export_data, out_path, sheet_name="Certificates Due")
         show_message(f"Certificates due list exported to {os.path.basename(out_path)}!", True)
+        ui_theme.show_export_success_dialog(page, out_path, record_count=len(export_data), report_title="Relieving Certificates Due")
 
     def export_inc_clicked(list_data, filename, sheet_name):
         if not list_data:
@@ -523,6 +525,7 @@ def dashboard_view(page: ft.Page, on_navigate: Optional[Callable] = None):
         ]
         excel_export_service.export_to_excel(export_data, out_path, sheet_name=sheet_name)
         show_message(f"Report exported to {os.path.basename(out_path)}!", True)
+        ui_theme.show_export_success_dialog(page, out_path, record_count=len(export_data), report_title=f"Annual Increments ({sheet_name})")
 
     # Table: Relieving Certificates Due
     if not exp_due_list:

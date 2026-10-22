@@ -15,6 +15,7 @@ from utils.ui_theme import (
     status_badge,
     primary_button,
     secondary_button,
+    show_export_success_dialog,
     COLOR_CARD_BG,
     COLOR_CARD_BORDER,
     COLOR_CARD_BG_HOVER,
@@ -206,6 +207,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
 
         excel_export_service.export_to_excel(export_data, out_path, sheet_name=sheet_title)
         show_message(f"Candidate list exported to {os.path.basename(out_path)}!", True)
+        show_export_success_dialog(page, out_path, record_count=len(export_data), report_title=sheet_title)
 
     # ---------------- Archive Confirmation Dialog (Soft Delete) ----------------
     def confirm_delete(cand_id: int, cand_name: str):

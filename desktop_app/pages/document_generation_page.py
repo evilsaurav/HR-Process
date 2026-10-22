@@ -36,6 +36,7 @@ from utils.ui_theme import (
     status_badge,
     primary_button,
     secondary_button,
+    show_export_success_dialog,
     COLOR_CARD_BG,
     COLOR_CARD_BORDER,
     COLOR_CARD_BG_HOVER,
@@ -1329,6 +1330,7 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
         ok, zpath, err = zip_export_service.create_bulk_document_zip(paths, "DFY_Staged_Documents.zip")
         if ok:
             show_message(f"Packaged {len(paths)} document(s) into ZIP: {os.path.basename(zpath)}!", True)
+            show_export_success_dialog(page, zpath, record_count=len(paths), report_title="Batch Document Archive (ZIP)")
         else:
             show_message(f"ZIP Export error: {err}", False)
 
@@ -1732,6 +1734,7 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
             ]
             excel_export_service.export_to_excel(export_data, out_path, sheet_name="Documents")
             show_message(f"Document history exported to {os.path.basename(out_path)}!", True)
+            show_export_success_dialog(page, out_path, record_count=len(export_data), report_title="Document Generation History")
 
         history_container.visible = True
         history_container.content = modern_card(ft.Column([
@@ -1778,6 +1781,7 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
             ]
             excel_export_service.export_to_excel(export_data, out_path, sheet_name="Email Log")
             show_message(f"Candidate email log exported to {os.path.basename(out_path)}!", True)
+            show_export_success_dialog(page, out_path, record_count=len(export_data), report_title="Candidate Email Dispatch Log")
 
         table_rows = []
         for r in logs:

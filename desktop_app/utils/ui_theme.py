@@ -37,6 +37,7 @@ FLET 1.0.4 UI API REFERENCE FINDINGS:
 =============================================================================
 """
 
+import os
 from typing import Optional, Union
 import flet as ft
 from utils.flet_compat import apply_flet_compat_shims
@@ -359,3 +360,150 @@ def app_footer() -> ft.Container:
         ),
         bgcolor=COLOR_SURFACE_DARK,
     )
+
+
+def show_export_success_dialog(
+    page: ft.Page,
+    file_path: str,
+    record_count: Optional[int] = None,
+    report_title: str = "Export Report",
+) -> ft.AlertDialog:
+    """
+    Renders a modern, consistent modal dialog notifying the user that an
+    export has succeeded and providing 1-click native OS actions:
+      1. Open the file directly in default app (Excel/Viewer)
+      2. Open the containing folder in Windows Explorer and select the file
+      3. Close the modal
+    """
+    from utils import file_launcher
+
+    # Calculate file size
+    size_str = "0 KB"
+    if file_path and os.path.exists(file_path):
+        size_bytes = os.path.getsize(file_path)
+        if size_bytes >= 1024 * 1024:
+            size_str = f"{size_bytes / (1024 * 1024):.2f} MB"
+        else:
+            size_str = f"{max(1, round(size_bytes / 1024))} KB"
+
+    details_parts = []
+    if record_count is not None:
+        details_parts.append(f"{record_count} Records")
+    details_parts.append(size_str)
+    details_label = " • ".join(details_parts)
+
+    def on_open_file(e):
+        file_launcher.open_file_externally(file_path)
+        page.close(dlg)
+
+    def on_open_folder(e):
+        file_launcher.open_folder_and_select(file_path)
+        page.close(dlg)
+
+    def on_close(e):
+        page.close(dlg)
+
+    dlg = ft.AlertDialog(
+        modal=True,
+        title=ft.Row(
+            [
+                ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=COLOR_SUCCESS, size=24),
+                ft.Text(
+                    f"{report_title} Exported Successfully",
+                    weight=ft.FontWeight.BOLD,
+                    color=COLOR_TEXT_PRIMARY,
+                    size=17,
+                ),
+            ],
+            spacing=10,
+        ),
+        content=ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "Your file has been exported and is ready for use.",
+                        size=13,
+                        color=COLOR_TEXT_SECONDARY,
+                    ),
+                    ft.Container(height=4),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Text("📄 File Name:", weight=ft.FontWeight.W_600, color=COLOR_TEXT_MUTED, size=12),
+                                        ft.Text(
+                                            os.path.basename(file_path) if file_path else "-",
+                                            weight=ft.FontWeight.BOLD,
+                                            color=COLOR_TEXT_PRIMARY,
+                                            size=12,
+                                            selectable=True,
+                                        ),
+                                    ],
+                                    spacing=8,
+                                    wrap=True,
+                                ),
+                                ft.Row(
+                                    [
+                                        ft.Text("📁 Saved To:", weight=ft.FontWeight.W_600, color=COLOR_TEXT_MUTED, size=12),
+                                        ft.Text(
+                                            file_path or "-",
+                                            color=COLOR_TEXT_SECONDARY,
+                                            size=12,
+                                            selectable=True,
+                                        ),
+                                    ],
+                                    spacing=8,
+                                    wrap=True,
+                                ),
+                                ft.Row(
+                                    [
+                                        ft.Text("📊 Details:", weight=ft.FontWeight.W_600, color=COLOR_TEXT_MUTED, size=12),
+                                        ft.Text(
+                                            details_label,
+                                            color=COLOR_PRIMARY_LIGHT,
+                                            weight=ft.FontWeight.W_600,
+                                            size=12,
+                                        ),
+                                    ],
+                                    spacing=8,
+                                ),
+                            ],
+                            spacing=6,
+                        ),
+                        padding=12,
+                        border_radius=10,
+                        bgcolor=COLOR_CARD_BG,
+                        border=ft.Border.all(1, COLOR_CARD_BORDER),
+                    ),
+                ],
+                tight=True,
+                spacing=4,
+            ),
+            width=520,
+        ),
+        actions=[
+            ft.ElevatedButton(
+                "📄 Open File",
+                icon=ft.Icons.OPEN_IN_NEW_ROUNDED,
+                bgcolor=COLOR_SUCCESS,
+                color=ft.Colors.WHITE,
+                on_click=on_open_file,
+            ),
+            ft.OutlinedButton(
+                "📁 Open Folder",
+                icon=ft.Icons.FOLDER_OPEN_ROUNDED,
+                on_click=on_open_folder,
+            ),
+            ft.TextButton(
+                "Close",
+                on_click=on_close,
+            ),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+    page.open(dlg)
+    page.update()
+    return dlg
+
