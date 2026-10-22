@@ -76,7 +76,7 @@ def settings_view(page: ft.Page):
         def do_delete(e):
             db_manager.delete_api_key(key_id)
             page.close(dlg)
-            refresh_keys_list()
+            refresh_keys_list(update_page=False)
             page.open(
                 ft.SnackBar(
                     ft.Text(f"API key for '{provider}' deleted successfully."),
@@ -106,7 +106,7 @@ def settings_view(page: ft.Page):
         page.open(dlg)
         page.update()
 
-    def refresh_keys_list():
+    def refresh_keys_list(update_page: bool = True):
         keys_list_column.controls.clear()
         for item in db_manager.get_all_api_keys():
             if item["provider"] == "Gmail":
@@ -123,7 +123,7 @@ def settings_view(page: ft.Page):
                 def _test(e):
                     success, msg = ai_service.test_connection(provider, key_val)
                     db_manager.mark_verified(k_id, success)
-                    refresh_keys_list()
+                    refresh_keys_list(update_page=False)
                     page.open(ft.SnackBar(ft.Text(msg), bgcolor=ft.Colors.GREEN if success else ft.Colors.RED))
                     page.update()
                 return _test
@@ -157,7 +157,8 @@ def settings_view(page: ft.Page):
                     ])
                 )
             )
-        page.update()
+        if update_page:
+            page.update()
 
     def add_key(e):
         key_val = api_key_input.value.strip()
@@ -168,7 +169,7 @@ def settings_view(page: ft.Page):
         db_manager.save_api_key(key_id, provider, key_val)
         api_key_input.value = ""
         detected_text.value = ""
-        refresh_keys_list()
+        refresh_keys_list(update_page=False)
         page.update()
 
     def on_key_change(e):
@@ -205,12 +206,10 @@ def settings_view(page: ft.Page):
                 db_manager.mark_verified("gmail_credentials_path", True)
         page.update()
 
-    refresh_keys_list()
-
     # ---------------- Email Dispatch History Card ----------------
     email_history_container = ft.Container()
 
-    def refresh_email_history():
+    def refresh_email_history(update_page: bool = True):
         logs = db_manager.get_email_logs(limit=100)
         if not logs:
             email_history_container.content = ft.Container(
@@ -282,9 +281,11 @@ def settings_view(page: ft.Page):
                 ft.Row([dt], scroll=ft.ScrollMode.AUTO),
             ], spacing=10)
 
-        page.update()
+        if update_page:
+            page.update()
 
-    refresh_email_history()
+    refresh_keys_list(update_page=False)
+    refresh_email_history(update_page=False)
 
     email_history_card = modern_card(ft.Column([
         section_title(ft.Icons.MARK_EMAIL_READ_ROUNDED, "Email Dispatch History & Audit Trail"),

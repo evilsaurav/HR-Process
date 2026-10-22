@@ -174,8 +174,6 @@ def get_doc_badge(doc_type: str) -> ft.Container:
 
 
 def document_generation_view(page: ft.Page, initial_tab: int = 0):
-    db_manager.init_db()
-
     # Centralized State
     state = {
         # Active view: 0=Detection, 1=Staging Hub, 2=Manual One-off

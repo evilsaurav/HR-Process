@@ -8,23 +8,26 @@ def register_overlay_control(page, control):
     Registers a non-visual control (FilePicker, etc.) with the page in a
     version-safe way. Flet 1.0.4+ uses page.services for Service-based
     controls; older Flet versions used page.overlay.
-
-    Decision rationale:
-    1. In Flet 1.0.4+, FilePicker inherits from `flet.controls.services.service.Service`.
-       It is a headless background service rather than a visual Flutter widget.
-       If added to `page.overlay`, Flutter tries to render it in the visual widget
-       tree, fails to find a widget named 'FilePicker', and displays a red banner:
-       "Unknown control: FilePicker".
-       Therefore, if `page.services` exists and is a list, we register it via
-       `page.services.append(control)`.
-    2. In older Flet versions (0.x), services did not exist and FilePicker had to be
-       in `page.overlay`. If `page.services` is absent (or for mock pages in unit tests),
-       we safely fallback to `page.overlay.append(control)`.
+    
+    Includes singleton/de-duplication protection so repeatedly switching
+    pages does not leak duplicate FilePicker controls into page.services or page.overlay.
     """
     if hasattr(page, "services") and isinstance(page.services, list):
+        for existing in page.services:
+            if isinstance(existing, type(control)) and type(control).__name__ == "FilePicker":
+                if hasattr(control, "on_result") and getattr(control, "on_result", None) is not None:
+                    existing.on_result = control.on_result
+                return existing
         page.services.append(control)
-    elif hasattr(page, "overlay"):
+        return control
+    elif hasattr(page, "overlay") and isinstance(page.overlay, list):
+        for existing in page.overlay:
+            if isinstance(existing, type(control)) and type(control).__name__ == "FilePicker":
+                if hasattr(control, "on_result") and getattr(control, "on_result", None) is not None:
+                    existing.on_result = control.on_result
+                return existing
         page.overlay.append(control)
+        return control
     else:
         raise RuntimeError("Could not find a compatible way to register overlay control with this Flet version.")
 

@@ -31,9 +31,6 @@ from utils.ui_theme import (
 
 
 def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
-    # Ensure DB is initialized
-    db_manager.init_db()
-
     # Feedback message helper matching app style
     def show_message(text: str, is_success: bool = True):
         page.open(
@@ -50,6 +47,79 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
     # Candidate table container
     table_container = ft.Container()
 
+    # Pagination state
+    pagination_state = {
+        "page": 1,
+        "page_size": 25,
+        "total_pages": 1,
+        "total_records": 0,
+    }
+
+    def on_page_size_change(e):
+        try:
+            pagination_state["page_size"] = int(e.control.value)
+        except Exception:
+            pagination_state["page_size"] = 25
+        refresh_candidates(reset_page=True)
+
+    def change_page(delta: int):
+        new_page = pagination_state["page"] + delta
+        if 1 <= new_page <= pagination_state["total_pages"]:
+            pagination_state["page"] = new_page
+            refresh_candidates(reset_page=False)
+
+    page_size_dropdown = ft.Dropdown(
+        value="25",
+        width=95,
+        dense=True,
+        border_radius=8,
+        border_color=COLOR_CARD_BORDER,
+        focused_border_color=COLOR_PRIMARY_LIGHT,
+        options=[
+            ft.dropdown.Option("15"),
+            ft.dropdown.Option("25"),
+            ft.dropdown.Option("50"),
+            ft.dropdown.Option("100"),
+        ],
+        on_change=on_page_size_change,
+    )
+
+    btn_prev_page = ft.IconButton(
+        icon=ft.Icons.CHEVRON_LEFT,
+        tooltip="Previous Page",
+        icon_color=COLOR_PRIMARY_LIGHT,
+        disabled=True,
+        on_click=lambda e: change_page(-1),
+    )
+
+    btn_next_page = ft.IconButton(
+        icon=ft.Icons.CHEVRON_RIGHT,
+        tooltip="Next Page",
+        icon_color=COLOR_PRIMARY_LIGHT,
+        disabled=True,
+        on_click=lambda e: change_page(1),
+    )
+
+    page_indicator_text = ft.Text("Page 1 of 1", size=13, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
+    record_range_text = ft.Text("Showing 0–0 of 0 candidates", size=12, color=COLOR_TEXT_SECONDARY)
+
+    pagination_container = ft.Container(
+        padding=ft.padding.only(top=10, bottom=4, left=4, right=4),
+        content=ft.Row([
+            ft.Row([
+                ft.Text("Rows per page:", size=12, color=COLOR_TEXT_SECONDARY),
+                page_size_dropdown,
+                record_range_text,
+            ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Container(expand=True),
+            ft.Row([
+                btn_prev_page,
+                page_indicator_text,
+                btn_next_page,
+            ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True),
+    )
+
     # Search & Filter Fields
     search_field = ft.TextField(
         label="Search candidates (Name, Mobile, Designation, Location)...",
@@ -58,7 +128,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         border_radius=10,
         border_color=COLOR_CARD_BORDER,
         focused_border_color=COLOR_PRIMARY_LIGHT,
-        on_change=lambda e: refresh_candidates(),
+        on_change=lambda e: refresh_candidates(reset_page=True),
     )
 
     status_filter = ft.Dropdown(
@@ -69,7 +139,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         border_color=COLOR_CARD_BORDER,
         focused_border_color=COLOR_PRIMARY_LIGHT,
         options=[ft.dropdown.Option("All")] + [ft.dropdown.Option(opt) for opt in STATUS_OPTIONS],
-        on_change=lambda e: refresh_candidates(),
+        on_change=lambda e: refresh_candidates(reset_page=True),
     )
 
     candidate_count_text = ft.Text("Candidates: 0", size=13, color=COLOR_TEXT_SECONDARY)
@@ -79,7 +149,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         value=False,
         active_color=COLOR_WARNING,
         tooltip="Toggle between active and archived candidates",
-        on_change=lambda e: refresh_candidates(),
+        on_change=lambda e: refresh_candidates(reset_page=True),
     )
 
     # Selection state for candidate checkboxes
@@ -139,7 +209,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
             tab_all_button.color = ft.Colors.WHITE
             tab_pending_button.bgcolor = COLOR_CARD_BG_HOVER
             tab_pending_button.color = COLOR_TEXT_PRIMARY
-        refresh_candidates()
+        refresh_candidates(reset_page=True)
 
     btn_review_send_welcome_text = ft.Text("✉️ Review & Send Welcome Emails", weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)
     btn_review_send_welcome = ft.ElevatedButton(
@@ -166,7 +236,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         else:
             for c in displayed:
                 selected_candidate_ids.discard(c["id"])
-        refresh_candidates()
+        refresh_candidates(reset_page=True)
 
     select_all_checkbox.on_change = on_select_all_toggle
 
@@ -214,7 +284,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         def do_archive(e):
             ok = db_manager.archive_candidate(cand_id)
             page.close(dlg)
-            refresh_candidates()
+            refresh_candidates(reset_page=True)
             if ok:
                 show_message(f"Candidate '{cand_name}' archived.", True)
             else:
@@ -250,7 +320,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         def do_restore(e):
             ok = db_manager.restore_candidate(cand_id)
             page.close(dlg)
-            refresh_candidates()
+            refresh_candidates(reset_page=True)
             if ok:
                 show_message(f"Candidate '{cand_name}' restored to active list.", True)
             else:
@@ -305,7 +375,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         def do_perm_delete(e):
             ok = db_manager.permanently_delete_candidate(cand_id)
             page.close(dlg)
-            refresh_candidates()
+            refresh_candidates(reset_page=True)
             if ok:
                 show_message(f"'{cand_name}' has been permanently deleted.", True)
             else:
@@ -505,7 +575,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
             for cand in target_candidates:
                 selected_candidate_ids.discard(cand.get("id"))
 
-            refresh_candidates()
+            refresh_candidates(reset_page=True)
 
             if success_cands and not fail_cands:
                 show_message(f"🎉 Welcome email sent successfully to {len(success_cands)} candidate(s)!", True)
@@ -613,11 +683,14 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
             new_status = e.control.value
             db_manager.update_candidate_status(cand_id, new_status)
             show_message(f"Status for '{cand_name}' updated to '{new_status}'", True)
-            refresh_candidates()
+            refresh_candidates(reset_page=True)
         return on_change
 
     # ---------------- Refresh Candidates Table ----------------
-    def refresh_candidates():
+    def refresh_candidates(reset_page: bool = False):
+        if reset_page:
+            pagination_state["page"] = 1
+
         term = search_field.value.strip() if search_field.value else ""
         is_archived = bool(show_archived_switch.value)
 
@@ -671,11 +744,28 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
             candidate_count_text.value = f"Total Candidates: {len(candidates)} | Pending Welcome Emails: {pending_count}"
             btn_review_send_welcome.visible = True
 
-        # Cache currently displayed candidates
-        current_candidates_cache["list"] = candidates
+        # Pagination calculations
+        total_records = len(candidates)
+        pagination_state["total_records"] = total_records
+        page_size = pagination_state["page_size"]
+        total_pages = max(1, (total_records + page_size - 1) // page_size)
+        pagination_state["total_pages"] = total_pages
+        if pagination_state["page"] > total_pages:
+            pagination_state["page"] = total_pages
+        if pagination_state["page"] < 1:
+            pagination_state["page"] = 1
 
-        # Update select all checkbox state
-        if candidates and all(c["id"] in selected_candidate_ids for c in candidates):
+        curr_page = pagination_state["page"]
+        start_idx = (curr_page - 1) * page_size
+        end_idx = min(start_idx + page_size, total_records)
+        visible_candidates = candidates[start_idx:end_idx] if total_records > 0 else []
+
+        # Cache currently displayed page candidates and all filtered candidates
+        current_candidates_cache["list"] = visible_candidates
+        current_candidates_cache["all"] = candidates
+
+        # Update select all checkbox state (reflects visible page rows)
+        if visible_candidates and all(c["id"] in selected_candidate_ids for c in visible_candidates):
             select_all_checkbox.value = True
         else:
             select_all_checkbox.value = False
@@ -686,6 +776,17 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
             btn_review_send_welcome_text.value = f"✉️ Review & Send Welcome Emails ({sel_count})"
         else:
             btn_review_send_welcome_text.value = "✉️ Review & Send Welcome Emails"
+
+        # Update pagination controls
+        page_indicator_text.value = f"Page {curr_page} of {total_pages}"
+        btn_prev_page.disabled = (curr_page <= 1)
+        btn_next_page.disabled = (curr_page >= total_pages)
+        if total_records > 0:
+            record_range_text.value = f"Showing {start_idx + 1}–{end_idx} of {total_records} candidates"
+            pagination_container.visible = True
+        else:
+            record_range_text.value = "Showing 0 candidates"
+            pagination_container.visible = False
 
         if not candidates:
             empty_msg = (
@@ -704,7 +805,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
             )
         else:
             rows = []
-            for c in candidates:
+            for c in visible_candidates:
                 cand_id = c["id"]
                 cand_name = c["candidate_name"] or "N/A"
                 cand_mobile = c["mobile"] or "N/A"
@@ -888,7 +989,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                             new_tag = e.control.value
                             db_manager.update_candidate_tag(cid, new_tag)
                             show_message(f"Updated tag for '{cname}' to '{new_tag or 'None'}'", True)
-                            refresh_candidates()
+                            refresh_candidates(reset_page=True)
                         return on_tag_change
 
                     tag_dd = ft.Dropdown(
@@ -952,16 +1053,25 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                     ft.DataColumn(ft.Text("Actions", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
                 ]
 
-            data_table = ft.DataTable(
-                columns=columns,
-                rows=rows,
-                heading_row_color=COLOR_CARD_BG_HOVER,
-                border=ft.Border.all(1, COLOR_CARD_BORDER),
-                border_radius=12,
-                column_spacing=20,
-            )
-
-            table_container.content = ft.Row([data_table], scroll=ft.ScrollMode.AUTO)
+            try:
+                data_table = ft.DataTable(
+                    columns=columns,
+                    rows=rows,
+                    heading_row_color=COLOR_CARD_BG_HOVER,
+                    border=ft.Border.all(1, COLOR_CARD_BORDER),
+                    border_radius=12,
+                    column_spacing=20,
+                )
+                table_container.content = ft.Row([data_table], scroll=ft.ScrollMode.AUTO)
+            except Exception as ex:
+                table_container.content = ft.Container(
+                    padding=24,
+                    alignment=ft.Alignment.CENTER,
+                    content=ft.Column([
+                        ft.Icon(ft.Icons.ERROR_OUTLINE, color=COLOR_ERROR, size=36),
+                        ft.Text(f"Could not render candidate table: {ex}", color=COLOR_TEXT_PRIMARY, size=13),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8),
+                )
 
         page.update()
 
@@ -1634,7 +1744,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
 
         summary_msg = f"{res['added_count']} new candidates added. {res['updated_count']} existing candidates updated. {res['kept_count']} duplicates left unchanged."
         show_message(summary_msg, True)
-        refresh_candidates()
+        refresh_candidates(reset_page=True)
 
     # ---------------- File Upload Processing ----------------
     def handle_spreadsheet_files(files):
@@ -1787,11 +1897,12 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                     icon=ft.Icons.REFRESH,
                     tooltip="Refresh List",
                     icon_color=COLOR_PRIMARY_LIGHT,
-                    on_click=lambda e: refresh_candidates(),
+                    on_click=lambda e: refresh_candidates(reset_page=False),
                 ),
             ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=12),
             candidate_count_text,
             table_container,
+            pagination_container,
         ], spacing=12)),
 
         ft.Container(height=20),
