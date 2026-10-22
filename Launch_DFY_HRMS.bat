@@ -27,26 +27,35 @@ echo ===========================================================================
 echo.
 
 :: 1. Probe for Python environment in order:
-::    1. %~dp0.venv\Scripts\python.exe
-::    2. %~dp0venv\Scripts\python.exe
-::    3. python.exe from system PATH
 set "PYTHON_EXE="
 
 if exist "%~dp0.venv\Scripts\python.exe" (
     set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
-    echo [OK] Using virtual environment (.venv): "!PYTHON_EXE!"
-) else if exist "%~dp0venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
-    echo [OK] Using virtual environment (venv): "!PYTHON_EXE!"
-) else (
-    python --version >nul 2>&1
-    if !errorlevel! equ 0 (
-        set "PYTHON_EXE=python"
-        echo [OK] Using system Python from PATH
-    )
+    echo [OK] Using virtual environment .venv
+    goto :python_found
 )
 
-:: 2. Check Python presence
+if exist "%~dp0venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
+    echo [OK] Using virtual environment venv
+    goto :python_found
+)
+
+python --version >nul 2>&1
+if !errorlevel! equ 0 (
+    set "PYTHON_EXE=python"
+    echo [OK] Using system Python from PATH
+    goto :python_found
+)
+
+py --version >nul 2>&1
+if !errorlevel! equ 0 (
+    set "PYTHON_EXE=py"
+    echo [OK] Using Windows Python Launcher py
+    goto :python_found
+)
+
+:python_found
 if "%PYTHON_EXE%"=="" (
     echo ===============================================================================
     echo [ERROR] Python was not found on your system!
@@ -66,10 +75,10 @@ if "%PYTHON_EXE%"=="" (
     exit /b 1
 )
 
-:: 3. Configure environment variables
+:: 2. Configure environment variables
 set "PYTHONPATH=%~dp0desktop_app;%~dp0;%PYTHONPATH%"
 
-:: 4. Launch Desktop Application
+:: 3. Launch Desktop Application
 echo [INFO] Launching Doctors For You HR Operations Platform...
 echo.
 "%PYTHON_EXE%" "%~dp0desktop_app\main.py" %*
@@ -97,17 +106,27 @@ set "PYTHON_EXE="
 if exist "%~dp0.venv\Scripts\python.exe" (
     set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
     echo [OK] Found .venv Python: "!PYTHON_EXE!"
-) else if exist "%~dp0venv\Scripts\python.exe" (
+    goto :env_check_done
+)
+if exist "%~dp0venv\Scripts\python.exe" (
     set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
     echo [OK] Found venv Python: "!PYTHON_EXE!"
-) else (
-    python --version >nul 2>&1
-    if !errorlevel! equ 0 (
-        set "PYTHON_EXE=python"
-        echo [OK] Found system Python in PATH
-    )
+    goto :env_check_done
+)
+python --version >nul 2>&1
+if !errorlevel! equ 0 (
+    set "PYTHON_EXE=python"
+    echo [OK] Found system Python in PATH
+    goto :env_check_done
+)
+py --version >nul 2>&1
+if !errorlevel! equ 0 (
+    set "PYTHON_EXE=py"
+    echo [OK] Found Windows Python Launcher py
+    goto :env_check_done
 )
 
+:env_check_done
 if "%PYTHON_EXE%"=="" (
     echo [ERROR] Python not found
     exit /b 1
