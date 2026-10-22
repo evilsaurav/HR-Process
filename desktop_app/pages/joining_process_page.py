@@ -967,18 +967,204 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
 
     # ---------------- Upload State & Duplicate Review Logic ----------------
     upload_state = {
+        "view_mode": "idle",  # "idle", "processing", "scenario_b_prompt", "scenario_a_review", "no_duplicates", "completed", "error"
         "file_path": None,
         "file_name": None,
-        "total_sheet_rows": 0,
+        "sheet_names": [],
+        "sheet_counts": {},
+        "rows_by_sheet": {},
+        "active_preview_sheet": "",
+        "detected_columns": [],
+        "mapped_columns_count": 0,
         "valid_rows": [],
-        "duplicates": [],
         "new_rows": [],
+        "duplicates": [],
+        "total_sheet_rows": 0,
         "duplicate_percentage": 0.0,
         "sheet_errors": [],
-        "view_mode": "idle",  # "idle", "processing", "scenario_b_prompt", "scenario_a_review", "no_duplicates", "completed", "error"
-        "error_message": "",
+        "error_message": None,
         "completion_summary": None,
     }
+
+    def cancel_upload():
+        upload_state["view_mode"] = "idle"
+        render_upload_ui()
+        show_message("Upload cancelled. No changes were made to the database.", True)
+
+    def build_upload_preview_panel(
+        show_action_bar: bool = True,
+        confirm_label: str = None,
+        on_confirm = None,
+        on_cancel = None,
+    ):
+        sheet_names = upload_state.get("sheet_names") or []
+        sheet_counts = upload_state.get("sheet_counts") or {}
+        rows_by_sheet = upload_state.get("rows_by_sheet") or {}
+        active_sheet = upload_state.get("active_preview_sheet")
+        if not active_sheet and sheet_names:
+            active_sheet = sheet_names[0]
+            upload_state["active_preview_sheet"] = active_sheet
+
+        total_sheet_rows = upload_state.get("total_sheet_rows", 0)
+        duplicates = upload_state.get("duplicates") or []
+        new_rows = upload_state.get("new_rows") or []
+        mapped_columns_count = upload_state.get("mapped_columns_count", 0)
+        file_name = upload_state.get("file_name") or "Spreadsheet"
+
+        # Section A: Sheet Switcher Tabs
+        sheet_tabs = []
+        for sname in sheet_names:
+            scount = sheet_counts.get(sname, len(rows_by_sheet.get(sname, [])))
+            is_active = (sname == active_sheet)
+
+            def make_tab_handler(sn=sname):
+                def on_tab_click(e):
+                    upload_state["active_preview_sheet"] = sn
+                    render_upload_ui()
+                return on_tab_click
+
+            sheet_tabs.append(
+                ft.ElevatedButton(
+                    text=f"📄 {sname} ({scount})",
+                    bgcolor=PRIMARY_COLOR if is_active else COLOR_CARD_BG_HOVER,
+                    color=ft.Colors.WHITE if is_active else COLOR_TEXT_PRIMARY,
+                    on_click=make_tab_handler(),
+                )
+            )
+
+        sheet_switcher_row = ft.Row(
+            sheet_tabs,
+            spacing=8,
+            scroll=ft.ScrollMode.AUTO,
+        )
+
+        # Section B: KPI Metrics Strip
+        def make_kpi_card(title: str, value_text: str, icon_data, accent_color):
+            return ft.Container(
+                bgcolor=COLOR_CARD_BG,
+                padding=ft.padding.symmetric(horizontal=14, vertical=10),
+                border_radius=8,
+                border=ft.Border.all(1, COLOR_CARD_BORDER),
+                expand=True,
+                content=ft.Row([
+                    ft.Icon(icon_data, color=accent_color, size=22),
+                    ft.Column([
+                        ft.Text(title, size=11, color=COLOR_TEXT_MUTED, weight=ft.FontWeight.W_500),
+                        ft.Text(value_text, size=13, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.BOLD),
+                    ], spacing=2, tight=True),
+                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            )
+
+        kpi_strip = ft.Row([
+            make_kpi_card("Total Extracted", f"📊 Total: {total_sheet_rows}", ft.Icons.ANALYTICS_OUTLINED, PRIMARY_COLOR),
+            make_kpi_card("New Additions", f"✨ New: {len(new_rows)}", ft.Icons.PERSON_ADD_ALT_1_ROUNDED, COLOR_SUCCESS),
+            make_kpi_card("Duplicate Records", f"🔄 Duplicates: {len(duplicates)}", ft.Icons.COPY_ALL_ROUNDED, COLOR_WARNING),
+            make_kpi_card("Column Health", f"✅ Columns: {mapped_columns_count} Mapped", ft.Icons.VIEW_COLUMN_ROUNDED, COLOR_PRIMARY_LIGHT),
+        ], spacing=10)
+
+        # Section C: 10-Row Extracted Candidate Preview DataTable
+        target_rows = rows_by_sheet.get(active_sheet) if (active_sheet and active_sheet in rows_by_sheet) else upload_state.get("valid_rows", [])
+        preview_rows = target_rows[:10] if target_rows else []
+
+        dt_columns = [
+            ft.DataColumn(ft.Text("Candidate Name", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
+            ft.DataColumn(ft.Text("Mobile", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
+            ft.DataColumn(ft.Text("Applied Designation", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
+            ft.DataColumn(ft.Text("Salary", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
+            ft.DataColumn(ft.Text("Location", weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY)),
+        ]
+
+        table_rows = []
+        for r in preview_rows:
+            c_name = r.get("candidate_name") or "N/A"
+            c_mob = r.get("mobile") or "N/A"
+            c_desig = r.get("applied_designation") or "N/A"
+            c_sal = r.get("negotiated_salary") or "N/A"
+            c_loc = r.get("contact_location") or "N/A"
+
+            table_rows.append(
+                ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(c_name, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)),
+                    ft.DataCell(ft.Text(c_mob, color=COLOR_TEXT_SECONDARY)),
+                    ft.DataCell(ft.Text(c_desig, color=COLOR_TEXT_SECONDARY)),
+                    ft.DataCell(ft.Text(f"₹{c_sal}" if c_sal != "N/A" else "N/A", color=COLOR_SUCCESS)),
+                    ft.DataCell(ft.Text(c_loc, color=COLOR_TEXT_SECONDARY)),
+                ])
+            )
+
+        if not table_rows:
+            table_rows.append(
+                ft.DataRow(cells=[
+                    ft.DataCell(ft.Text("No candidates found in this sheet", italic=True, color=COLOR_TEXT_MUTED)),
+                    ft.DataCell(ft.Text("")),
+                    ft.DataCell(ft.Text("")),
+                    ft.DataCell(ft.Text("")),
+                    ft.DataCell(ft.Text("")),
+                ])
+            )
+
+        preview_dt = ft.DataTable(
+            columns=dt_columns,
+            rows=table_rows,
+            heading_row_color=COLOR_CARD_BG_HOVER,
+            border=ft.Border.all(1, COLOR_CARD_BORDER),
+            border_radius=8,
+            column_spacing=18,
+        )
+
+        table_container = ft.Container(
+            border=ft.Border.all(1, COLOR_CARD_BORDER),
+            border_radius=8,
+            content=ft.Row([preview_dt], scroll=ft.ScrollMode.AUTO),
+        )
+
+        panel_items = [
+            ft.Row([
+                ft.Icon(ft.Icons.PREVIEW_ROUNDED, color=PRIMARY_COLOR, size=20),
+                ft.Text(f"Visual File Preview: {file_name}", size=14, weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY),
+                ft.Container(expand=True),
+                ft.Text(
+                    f"Showing first {min(10, len(target_rows))} of {len(target_rows)} in '{active_sheet}'" if target_rows else "",
+                    size=11, color=COLOR_TEXT_MUTED
+                ),
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+        ]
+
+        if sheet_tabs:
+            panel_items.extend([
+                ft.Text("Worksheet Tabs:", size=11, weight=ft.FontWeight.W_600, color=COLOR_TEXT_SECONDARY),
+                sheet_switcher_row,
+            ])
+
+        panel_items.extend([
+            kpi_strip,
+            table_container,
+        ])
+
+        if show_action_bar:
+            c_label = confirm_label or f"🚀 Confirm & Ingest {total_sheet_rows} Candidate(s)"
+            action_bar = ft.Row([
+                primary_button(
+                    c_label,
+                    icon=ft.Icons.CLOUD_UPLOAD_ROUNDED,
+                    bgcolor=COLOR_SUCCESS,
+                    on_click=on_confirm or (lambda e: apply_confirmed_changes()),
+                ),
+                secondary_button(
+                    "Cancel Upload",
+                    icon=ft.Icons.CLOSE_ROUNDED,
+                    on_click=on_cancel or (lambda e: cancel_upload()),
+                ),
+            ], spacing=10)
+            panel_items.append(action_bar)
+
+        return ft.Container(
+            bgcolor=COLOR_CARD_BG,
+            padding=16,
+            border_radius=12,
+            border=ft.Border.all(1, COLOR_CARD_BORDER),
+            content=ft.Column(panel_items, spacing=12),
+        )
 
     def render_upload_ui():
         upload_status_column.controls.clear()
@@ -1023,25 +1209,74 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
             added = sum_data.get("added_count", 0)
             updated = sum_data.get("updated_count", 0)
             kept = sum_data.get("kept_count", 0)
-            upload_status_column.controls.append(
-                ft.Container(
-                    bgcolor=COLOR_CARD_BG_HOVER,
-                    padding=16,
-                    border_radius=10,
-                    border=ft.Border.all(1, COLOR_SUCCESS),
-                    content=ft.Column([
-                        ft.Row([
-                            ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=COLOR_SUCCESS, size=24),
+            file_name = upload_state.get("file_name") or "Spreadsheet"
+            sheet_counts = upload_state.get("sheet_counts") or {}
+
+            # Sheet breakdown chips
+            sheet_chips = []
+            for sname, scnt in sheet_counts.items():
+                sheet_chips.append(
+                    ft.Container(
+                        content=ft.Text(f"📄 {sname}: {scnt} candidate(s)", size=12, color=COLOR_TEXT_PRIMARY, weight=ft.FontWeight.W_500),
+                        bgcolor=COLOR_CARD_BG,
+                        padding=ft.padding.symmetric(horizontal=10, vertical=6),
+                        border_radius=8,
+                        border=ft.Border.all(1, COLOR_CARD_BORDER),
+                    )
+                )
+
+            def on_review_welcome_emails(e):
+                set_quick_filter("pending_welcome")
+                upload_state["view_mode"] = "idle"
+                render_upload_ui()
+
+            def on_view_in_pipeline(e):
+                set_quick_filter("all")
+                upload_state["view_mode"] = "idle"
+                render_upload_ui()
+
+            btn_welcome = primary_button(
+                "✉️ Review Welcome Emails",
+                icon=ft.Icons.MARK_EMAIL_READ,
+                bgcolor=COLOR_SUCCESS,
+                on_click=on_review_welcome_emails,
+            )
+
+            btn_pipeline = secondary_button(
+                "👥 View In Pipeline",
+                icon=ft.Icons.PEOPLE_ALT,
+                on_click=on_view_in_pipeline,
+            )
+
+            completion_card = ft.Container(
+                bgcolor=COLOR_CARD_BG_HOVER,
+                padding=18,
+                border_radius=12,
+                border=ft.Border.all(1, COLOR_SUCCESS),
+                content=ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=COLOR_SUCCESS, size=28),
+                        ft.Column([
                             ft.Text(
-                                f"{added} new candidates added. {updated} existing candidates updated. {kept} duplicates left unchanged.",
+                                f"🎉 Successfully processed '{file_name}': {added} Added, {updated} Updated, {kept} Kept.",
                                 color=COLOR_SUCCESS,
                                 weight=ft.FontWeight.BOLD,
-                                size=14,
+                                size=15,
                             ),
-                        ], spacing=10),
-                    ], spacing=6),
-                )
+                            ft.Text(
+                                f"{added} new candidates added. {updated} existing candidates updated. {kept} duplicates left unchanged.",
+                                color=COLOR_TEXT_SECONDARY,
+                                size=12,
+                            ),
+                        ], spacing=2, expand=True),
+                    ], spacing=12),
+                    *( [ft.Row(sheet_chips, wrap=True, spacing=8)] if sheet_chips else [] ),
+                    ft.Container(height=4),
+                    ft.Row([btn_welcome, btn_pipeline], spacing=10),
+                ], spacing=10),
             )
+
+            upload_status_column.controls.append(completion_card)
             page.update()
             return
 
@@ -1064,9 +1299,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                 render_upload_ui()
 
             def on_cancel(e):
-                upload_state["view_mode"] = "idle"
-                render_upload_ui()
-                show_message("Upload cancelled. No changes were made to the database.", True)
+                cancel_upload()
 
             banner = ft.Container(
                 bgcolor=COLOR_WARNING_BG,
@@ -1109,7 +1342,11 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                     ], spacing=10, wrap=True),
                 ], spacing=10),
             )
+
+            preview_panel = build_upload_preview_panel(show_action_bar=False)
+
             upload_status_column.controls.append(banner)
+            upload_status_column.controls.append(preview_panel)
             page.update()
             return
 
@@ -1127,9 +1364,7 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                 render_upload_ui()
 
             def on_cancel(e):
-                upload_state["view_mode"] = "idle"
-                render_upload_ui()
-                show_message("Upload cancelled. No changes were made to the database.", True)
+                cancel_upload()
 
             # Toolbar with bulk helpers
             toolbar = ft.Row([
@@ -1325,6 +1560,8 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                 ),
             ], spacing=12)
 
+            preview_panel = build_upload_preview_panel(show_action_bar=False)
+
             review_panel = ft.Container(
                 bgcolor=COLOR_CARD_BG,
                 padding=16,
@@ -1337,6 +1574,8 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                     new_summary_card,
                     *skipped_warnings,
                     ft.Divider(height=1, color=COLOR_CARD_BORDER),
+                    preview_panel,
+                    ft.Divider(height=1, color=COLOR_CARD_BORDER),
                     action_bar,
                 ], spacing=14),
             )
@@ -1347,53 +1586,34 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
 
         # ---------------- Case: 0 Duplicates (All new) ----------------
         if mode == "no_duplicates":
+            total_sheet_rows = upload_state.get("total_sheet_rows", len(upload_state["new_rows"]))
             new_count = len(upload_state["new_rows"])
 
-            def on_add_all_new(e):
-                apply_confirmed_changes()
-
-            def on_cancel(e):
-                upload_state["view_mode"] = "idle"
-                render_upload_ui()
-                show_message("Upload cancelled. No changes were made to the database.", True)
-
-            panel = ft.Container(
+            success_banner = ft.Container(
                 bgcolor=COLOR_CARD_BG_HOVER,
-                padding=18,
-                border_radius=12,
+                padding=12,
+                border_radius=8,
                 border=ft.Border.all(1, COLOR_SUCCESS),
-                content=ft.Column([
-                    ft.Row([
-                        ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=COLOR_SUCCESS, size=24),
-                        ft.Text(
-                            f"No duplicates found! All {new_count} candidates in this file are genuinely new.",
-                            size=15,
-                            weight=ft.FontWeight.BOLD,
-                            color=COLOR_TEXT_PRIMARY,
-                        ),
-                    ], spacing=10),
+                content=ft.Row([
+                    ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=COLOR_SUCCESS, size=20),
                     ft.Text(
-                        "Click below to add these new candidates to the database pipeline.",
-                        size=13,
-                        color=COLOR_TEXT_SECONDARY,
+                        f"No duplicates found! All {new_count} candidates in this file are genuinely new.",
+                        size=14,
+                        weight=ft.FontWeight.BOLD,
+                        color=COLOR_SUCCESS,
                     ),
-                    ft.Container(height=4),
-                    ft.Row([
-                        primary_button(
-                            f"Add {new_count} New Candidate(s)",
-                            icon=ft.Icons.PERSON_ADD_ROUNDED,
-                            bgcolor=PRIMARY_COLOR,
-                            on_click=on_add_all_new,
-                        ),
-                        secondary_button(
-                            "Cancel Upload",
-                            icon=ft.Icons.CLOSE_ROUNDED,
-                            on_click=on_cancel,
-                        ),
-                    ], spacing=10),
                 ], spacing=10),
             )
-            upload_status_column.controls.append(panel)
+
+            preview_panel = build_upload_preview_panel(
+                show_action_bar=True,
+                confirm_label=f"🚀 Confirm & Ingest {total_sheet_rows} Candidate(s)",
+                on_confirm=lambda e: apply_confirmed_changes(),
+                on_cancel=lambda e: cancel_upload(),
+            )
+            preview_panel.content.controls.insert(0, success_banner)
+
+            upload_status_column.controls.append(preview_panel)
             page.update()
             return
 
@@ -1442,10 +1662,29 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         valid_rows = extracted.get("valid_rows", [])
         sheet_errors = extracted.get("errors", [])
         total_sheet_rows = extracted.get("total_sheet_rows", len(valid_rows))
+        sheet_names = extracted.get("sheet_names", [])
+        sheet_counts = extracted.get("sheet_counts", {})
+        rows_by_sheet = extracted.get("rows_by_sheet", {})
+        detected_columns = extracted.get("detected_columns", [])
+        mapped_columns_count = extracted.get("mapped_columns_count", len(detected_columns))
+
+        if not sheet_names and valid_rows:
+            default_sheet = file_name or "Sheet1"
+            sheet_names = [default_sheet]
+            sheet_counts = {default_sheet: len(valid_rows)}
+            rows_by_sheet = {default_sheet: valid_rows}
 
         # Step 2: Detect duplicates
         dup_res = sheet_processor.detect_duplicates(valid_rows)
 
+        upload_state["file_path"] = file_path
+        upload_state["file_name"] = file_name
+        upload_state["sheet_names"] = sheet_names
+        upload_state["sheet_counts"] = sheet_counts
+        upload_state["rows_by_sheet"] = rows_by_sheet
+        upload_state["active_preview_sheet"] = sheet_names[0] if sheet_names else ""
+        upload_state["detected_columns"] = detected_columns
+        upload_state["mapped_columns_count"] = mapped_columns_count
         upload_state["total_sheet_rows"] = total_sheet_rows
         upload_state["valid_rows"] = valid_rows
         upload_state["duplicates"] = dup_res.get("duplicates", [])
