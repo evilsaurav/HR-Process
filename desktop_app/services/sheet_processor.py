@@ -128,10 +128,63 @@ def compute_name_similarity(name1: str, name2: str) -> float:
     return round(difflib.SequenceMatcher(None, n1, n2).ratio(), 4)
 
 
+CANDIDATE_HEADER_SYNONYMS = {
+    "candidate_name": ["candidatename", "name", "fullname", "applicantname", "applicant"],
+    "mobile": ["mobile", "mobilephone", "phone", "contactnumber", "contactno", "contact", "cell"],
+    "email": ["email", "emailid", "mail", "workemail", "personalemail"],
+    "applied_designation": ["applieddesignation", "appliedpost", "post", "designation", "jobtitle", "role", "position"],
+    "negotiated_salary": ["negotiatedsalary", "salary", "expectedsalary", "currentsalary", "offeredsalary", "grosssalary"],
+    "contact_location": ["contactlocation", "appliedlocation", "location", "city", "postinglocation", "address", "state"],
+    "recent_designation": ["recentdesignation", "currentdesignation", "experiencedetails", "previousdesignation"],
+    "highest_education": ["highesteducationqualification", "highesteducationqualificatio", "highesteducation", "qualification", "education"],
+    "total_experience": ["totalyearsofexperienceinferred", "totalyearsofexperienceinf", "totalyearsofexperience", "totalexperience", "experience", "yearsofexperience"],
+    "core_technical_skills": ["coretechnicalskills", "technicalskills", "skills", "keyskills"],
+    "key_responsibilities": ["keyresponsibilities", "responsibilities", "worksummary", "jobprofile"],
+}
+
+
+def clean_text_value(v) -> str:
+    """Cleans empty, null, placeholder strings and strips float .0 suffixes."""
+    if v is None:
+        return ""
+    s = str(v).strip()
+    if s.lower() in [
+        "none", "nan", "null", "not in source", "not mentioned in source",
+        "not specified in resume", "not mentioned in resume", "not mentioned",
+        "not specified", "na", "n/a", "--", "-"
+    ]:
+        return ""
+    # Strip .0 on numbers (e.g. 12000.0 -> 12000)
+    if s.endswith(".0") and s[:-2].replace(".", "").isdigit():
+        return s[:-2]
+    return s
+
+
+def clean_mobile_value(v) -> str:
+    """
+    Extracts a clean 10-digit mobile number, handling float .0 suffixes,
+    multi-number slashes/commas ('9110160907/7209381849'), and +91 prefixes.
+    """
+    if not v:
+        return ""
+    s = str(v).strip()
+    if s.endswith(".0") and s[:-2].replace(".", "").isdigit():
+        s = s[:-2]
+    # Check for 10-digit Indian mobile pattern
+    m = re.search(r"(?:(?:\+|0{0,2})91[\s-]*)?([6-9]\d{9})", s)
+    if m:
+        return m.group(1)
+    digits = re.sub(r"\D", "", s)
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
 def extract_candidate_rows_from_sheet(file_path: str) -> dict:
     """
-    Safely reads and validates candidate rows from an Excel or CSV file
-    WITHOUT writing anything to the database.
+    Intelligently reads and extracts candidate rows across ALL sheets in an Excel or CSV file.
+    - Dynamically auto-detects header rows and column mappings in multiple stacked batches.
+    - Never stops if an optional column is missing; extracts all available fields.
+    - Automatically cleans float suffixes, extracts valid 10-digit mobiles, and filters out banner rows.
+    - Sets department/project context from sheet names.
 
     Returns:
       {
@@ -139,6 +192,7 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
           "error": str or None,
           "total_sheet_rows": int,
           "valid_rows": list[dict],
+          "sheets_processed": list[str],
           "errors": list[str]
       }
     """
@@ -148,71 +202,225 @@ def extract_candidate_rows_from_sheet(file_path: str) -> dict:
             "error": "The selected file could not be found. Please check the file path and try again.",
             "total_sheet_rows": 0,
             "valid_rows": [],
+            "sheets_processed": [],
             "errors": [],
         }
 
-    try:
-        df = read_sheet(file_path)
-    except Exception as e:
-        print("Error reading spreadsheet file:", e)
-        return {
-            "success": False,
-            "error": "We couldn't read this file. Please make sure it's a valid Excel (.xlsx, .xls) or CSV file, close it if it's open in Microsoft Excel, and try again.",
-            "total_sheet_rows": 0,
-            "valid_rows": [],
-            "errors": [],
-        }
+    def _tok(val):
+        return re.sub(r"[^a-z0-9]", "", str(val or "").lower())
 
-    if df.empty:
-        return {
-            "success": False,
-            "error": "The uploaded file is empty. Please select a spreadsheet with candidate data.",
-            "total_sheet_rows": 0,
-            "valid_rows": [],
-            "errors": [],
-        }
-
-    missing = validate_columns(df)
-    if missing:
-        return {
-            "success": False,
-            "error": f"The uploaded sheet is missing required columns: {', '.join(missing)}. Please check your column headers.",
-            "total_sheet_rows": len(df),
-            "valid_rows": [],
-            "errors": [],
-        }
+    BANNER_PHRASES = [
+        "interview date", "candidate comparison", "candidate profile",
+        "roster", "interview", "plain text values", "summary",
+        "candidate professional profile"
+    ]
 
     valid_rows = []
     errors = []
+    sheets_processed = []
 
-    for idx, row in df.iterrows():
-        row_num = idx + 2
-        mobile = normalize_mobile(row.get("Mobile", ""))
-        if not mobile or len(mobile) < 10:
-            errors.append(f"Row {row_num}: Invalid or missing 10-digit mobile number")
-            continue
+    # Strategy 1: Excel Multi-Sheet Extraction
+    if file_path.lower().endswith((".xlsx", ".xls")):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            sheet_names = wb.sheetnames
+        except Exception as ex:
+            print("openpyxl load error, attempting pandas fallback:", ex)
+            try:
+                with pd.ExcelFile(file_path) as xl:
+                    sheet_names = xl.sheet_names
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": "We couldn't read this file. Please make sure it's a valid Excel file, close it if open in Microsoft Excel, and try again.",
+                    "total_sheet_rows": 0,
+                    "valid_rows": [],
+                    "sheets_processed": [],
+                    "errors": [str(e)],
+                }
+            wb = None
 
-        cand_data = {
-            "row_index": row_num,
-            "candidate_name": str(row.get("Candidate Name", "")).strip(),
-            "mobile": mobile,
-            "email": str(row.get("Email", "")).strip(),
-            "applied_designation": str(row.get("Applied Designation", "")).strip(),
-            "negotiated_salary": str(row.get("Negotiated Salary", "")).strip(),
-            "recent_designation": str(row.get("Recent Designation", "")).strip(),
-            "highest_education": str(row.get("Highest Education Qualification", "")).strip(),
-            "total_experience": str(row.get("Total Years of Experience (Inferred)", "")).strip(),
-            "core_technical_skills": str(row.get("Core Technical Skills", "")).strip(),
-            "key_responsibilities": str(row.get("Key Responsibilities", "")).strip(),
-            "contact_location": str(row.get("Contact Location", "")).strip(),
+        for sheet_name in sheet_names:
+            try:
+                if wb is not None:
+                    sheet = wb[sheet_name]
+                    raw_rows = list(sheet.iter_rows(values_only=True))
+                else:
+                    with pd.ExcelFile(file_path) as xl:
+                        raw_df = xl.parse(sheet_name, header=None)
+                        raw_rows = raw_df.values.tolist()
+            except Exception as e:
+                errors.append(f"Sheet '{sheet_name}' read error: {e}")
+                continue
+
+            # Skip empty sheets
+            if not raw_rows or not any(any(r) for r in raw_rows):
+                continue
+
+            sheets_processed.append(sheet_name)
+            current_col_indices = {}
+
+            for r_idx, row in enumerate(raw_rows):
+                if not any(row):
+                    continue
+
+                tok_row = [_tok(c) for c in row]
+                matches = 0
+                temp_map = {}
+
+                # Check if this row is a header row
+                for col_idx, t in enumerate(tok_row):
+                    if not t:
+                        continue
+                    for field, keywords in CANDIDATE_HEADER_SYNONYMS.items():
+                        if field not in temp_map:
+                            if any(t == kw or t.startswith(kw) or kw.startswith(t) for kw in keywords if len(t) >= 4):
+                                temp_map[field] = col_idx
+                                matches += 1
+                                break
+
+                # Header detection threshold: Has candidate_name and (mobile or email or matches >= 3)
+                if "candidate_name" in temp_map and ("mobile" in temp_map or "email" in temp_map or matches >= 3):
+                    current_col_indices = temp_map
+                    continue
+
+                if not current_col_indices or "candidate_name" not in current_col_indices:
+                    continue
+
+                name_col = current_col_indices.get("candidate_name")
+                raw_name = row[name_col] if name_col is not None and name_col < len(row) else None
+                s_name = clean_text_value(raw_name)
+
+                # Skip header repetitions and banner rows
+                if not s_name or any(b in s_name.lower() for b in BANNER_PHRASES):
+                    continue
+
+                cand_data = {
+                    "row_index": r_idx + 1,
+                    "sheet_name": sheet_name,
+                    "department": sheet_name,
+                    "source_sheet_name": f"{os.path.basename(file_path)} [{sheet_name}]",
+                    "candidate_name": s_name,
+                }
+
+                # Extract all mapped fields (never stop if any optional column is missing)
+                for field in [
+                    "applied_designation", "negotiated_salary", "recent_designation",
+                    "highest_education", "total_experience", "core_technical_skills",
+                    "key_responsibilities", "contact_location"
+                ]:
+                    col_idx = current_col_indices.get(field)
+                    val = row[col_idx] if col_idx is not None and col_idx < len(row) else None
+                    cand_data[field] = clean_text_value(val)
+
+                # Mobile extraction
+                mob_col = current_col_indices.get("mobile")
+                raw_mob = row[mob_col] if mob_col is not None and mob_col < len(row) else None
+                cand_data["mobile"] = clean_mobile_value(raw_mob)
+
+                # Email extraction
+                email_col = current_col_indices.get("email")
+                raw_email = row[email_col] if email_col is not None and email_col < len(row) else None
+                cand_data["email"] = clean_text_value(raw_email)
+
+                # A valid candidate must have a reasonable name and either a 10-digit mobile or an email
+                has_mob = bool(cand_data["mobile"] and len(cand_data["mobile"]) == 10 and cand_data["mobile"].isdigit())
+                has_email = bool(cand_data["email"] and "@" in cand_data["email"])
+
+                if (has_mob or has_email) and len(s_name) >= 2:
+                    valid_rows.append(cand_data)
+
+    # Strategy 2: CSV / TSV Fallback Extraction
+    else:
+        try:
+            df = read_sheet(file_path)
+            sheets_processed.append(os.path.basename(file_path))
+            raw_rows = [list(df.columns)] + df.values.tolist()
+            current_col_indices = {}
+
+            for r_idx, row in enumerate(raw_rows):
+                tok_row = [_tok(c) for c in row]
+                matches = 0
+                temp_map = {}
+                for col_idx, t in enumerate(tok_row):
+                    if not t:
+                        continue
+                    for field, keywords in CANDIDATE_HEADER_SYNONYMS.items():
+                        if field not in temp_map:
+                            if any(t == kw or t.startswith(kw) or kw.startswith(t) for kw in keywords if len(t) >= 4):
+                                temp_map[field] = col_idx
+                                matches += 1
+                                break
+
+                if "candidate_name" in temp_map and ("mobile" in temp_map or "email" in temp_map or matches >= 3):
+                    current_col_indices = temp_map
+                    continue
+
+                if not current_col_indices or "candidate_name" not in current_col_indices:
+                    continue
+
+                name_col = current_col_indices.get("candidate_name")
+                raw_name = row[name_col] if name_col is not None and name_col < len(row) else None
+                s_name = clean_text_value(raw_name)
+
+                if not s_name or any(b in s_name.lower() for b in BANNER_PHRASES):
+                    continue
+
+                cand_data = {
+                    "row_index": r_idx + 1,
+                    "sheet_name": os.path.basename(file_path),
+                    "department": "",
+                    "source_sheet_name": os.path.basename(file_path),
+                    "candidate_name": s_name,
+                }
+                for field in [
+                    "applied_designation", "negotiated_salary", "recent_designation",
+                    "highest_education", "total_experience", "core_technical_skills",
+                    "key_responsibilities", "contact_location"
+                ]:
+                    col_idx = current_col_indices.get(field)
+                    val = row[col_idx] if col_idx is not None and col_idx < len(row) else None
+                    cand_data[field] = clean_text_value(val)
+
+                mob_col = current_col_indices.get("mobile")
+                raw_mob = row[mob_col] if mob_col is not None and mob_col < len(row) else None
+                cand_data["mobile"] = clean_mobile_value(raw_mob)
+
+                email_col = current_col_indices.get("email")
+                raw_email = row[email_col] if email_col is not None and email_col < len(row) else None
+                cand_data["email"] = clean_text_value(raw_email)
+
+                has_mob = bool(cand_data["mobile"] and len(cand_data["mobile"]) == 10 and cand_data["mobile"].isdigit())
+                has_email = bool(cand_data["email"] and "@" in cand_data["email"])
+                if (has_mob or has_email) and len(s_name) >= 2:
+                    valid_rows.append(cand_data)
+        except Exception as ex:
+            return {
+                "success": False,
+                "error": "We couldn't read this CSV file. Please make sure it contains candidate data.",
+                "total_sheet_rows": 0,
+                "valid_rows": [],
+                "sheets_processed": [],
+                "errors": [str(ex)],
+            }
+
+    if not valid_rows:
+        return {
+            "success": False,
+            "error": "We could not find any candidate records with names and contact details in this spreadsheet. Please check the sheet headers.",
+            "total_sheet_rows": 0,
+            "valid_rows": [],
+            "sheets_processed": sheets_processed,
+            "errors": errors,
         }
-        valid_rows.append(cand_data)
 
     return {
         "success": True,
         "error": None,
-        "total_sheet_rows": len(df),
+        "total_sheet_rows": len(valid_rows),
         "valid_rows": valid_rows,
+        "sheets_processed": sheets_processed,
         "errors": errors,
     }
 
@@ -336,6 +544,7 @@ def safe_update_candidate(candidate_id: int, new_data: dict, source_sheet_name: 
         "core_technical_skills",
         "key_responsibilities",
         "contact_location",
+        "department",
     ]
 
     updates = []
@@ -379,20 +588,39 @@ def insert_new_candidate(data: dict, source_sheet_name: str = "") -> bool:
     """
     Inserts a genuinely new candidate record into the candidates table.
     Default status is 'Applied'.
+    If a record with the same mobile already exists (e.g. interviewed twice across batches),
+    it safely updates and merges non-empty fields into the existing record.
     """
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = db_manager.get_connection()
     cur = conn.cursor()
     try:
+        cand_mob = str(data.get("mobile") or "").strip() or None
+        sheet_src = str(source_sheet_name or data.get("source_sheet_name") or "").strip()
+
         cur.execute("""
             INSERT INTO candidates
             (candidate_name, mobile, email, applied_designation, negotiated_salary,
              recent_designation, highest_education, total_experience, core_technical_skills,
-             key_responsibilities, contact_location, status, source_sheet_name, upload_date, last_updated)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             key_responsibilities, contact_location, department, status, source_sheet_name, upload_date, last_updated)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(mobile) DO UPDATE SET
+                candidate_name=COALESCE(NULLIF(excluded.candidate_name, ''), candidates.candidate_name),
+                email=COALESCE(NULLIF(excluded.email, ''), candidates.email),
+                applied_designation=COALESCE(NULLIF(excluded.applied_designation, ''), candidates.applied_designation),
+                negotiated_salary=COALESCE(NULLIF(excluded.negotiated_salary, ''), candidates.negotiated_salary),
+                recent_designation=COALESCE(NULLIF(excluded.recent_designation, ''), candidates.recent_designation),
+                highest_education=COALESCE(NULLIF(excluded.highest_education, ''), candidates.highest_education),
+                total_experience=COALESCE(NULLIF(excluded.total_experience, ''), candidates.total_experience),
+                core_technical_skills=COALESCE(NULLIF(excluded.core_technical_skills, ''), candidates.core_technical_skills),
+                key_responsibilities=COALESCE(NULLIF(excluded.key_responsibilities, ''), candidates.key_responsibilities),
+                contact_location=COALESCE(NULLIF(excluded.contact_location, ''), candidates.contact_location),
+                department=COALESCE(NULLIF(excluded.department, ''), candidates.department),
+                source_sheet_name=COALESCE(NULLIF(excluded.source_sheet_name, ''), candidates.source_sheet_name),
+                last_updated=excluded.last_updated
         """, (
             str(data.get("candidate_name") or "").strip(),
-            str(data.get("mobile") or "").strip(),
+            cand_mob,
             str(data.get("email") or "").strip(),
             str(data.get("applied_designation") or "").strip(),
             str(data.get("negotiated_salary") or "").strip(),
@@ -402,8 +630,9 @@ def insert_new_candidate(data: dict, source_sheet_name: str = "") -> bool:
             str(data.get("core_technical_skills") or "").strip(),
             str(data.get("key_responsibilities") or "").strip(),
             str(data.get("contact_location") or "").strip(),
+            str(data.get("department") or "").strip(),
             "Applied",
-            str(source_sheet_name or data.get("source_sheet_name") or "").strip(),
+            sheet_src,
             now,
             now
         ))
@@ -448,10 +677,11 @@ def apply_joining_decisions(
         cand_id = item.get("existing_record", {}).get("id")
         uploaded = item.get("uploaded_row", {})
         cand_name = uploaded.get("candidate_name") or item.get("existing_record", {}).get("candidate_name") or "Candidate"
+        sheet_source = source_sheet_name or uploaded.get("source_sheet_name") or ""
 
         if action == "replace":
             if cand_id:
-                ok = safe_update_candidate(cand_id, uploaded, source_sheet_name=source_sheet_name)
+                ok = safe_update_candidate(cand_id, uploaded, source_sheet_name=sheet_source)
                 if ok:
                     updated_count += 1
                 else:
@@ -465,7 +695,8 @@ def apply_joining_decisions(
     # 2. Process genuinely new candidates
     for new_cand in new_rows:
         cand_name = new_cand.get("candidate_name") or "New Candidate"
-        ok = insert_new_candidate(new_cand, source_sheet_name=source_sheet_name)
+        sheet_source = source_sheet_name or new_cand.get("source_sheet_name") or ""
+        ok = insert_new_candidate(new_cand, source_sheet_name=sheet_source)
         if ok:
             added_count += 1
         else:

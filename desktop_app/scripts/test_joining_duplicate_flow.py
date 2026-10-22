@@ -249,9 +249,10 @@ def run_tests():
         # TEST 4: Single candidate regression tests
         # -----------------------------------------------------------------
         print("\n[TEST 4] Testing single candidate search, filtering, status change, delete...")
-        search_field = view.controls[4].content.controls[2].controls[0]
-        status_filter = view.controls[4].content.controls[2].controls[1]
-        refresh_btn = view.controls[4].content.controls[2].controls[2]
+        toolbar = view.controls[4].content.controls[3]
+        search_field = toolbar.controls[0]
+        status_filter = toolbar.controls[1]
+        refresh_btn = toolbar.controls[2]
 
         search_field.value = "New Person A1"
         search_field.on_change(None)
