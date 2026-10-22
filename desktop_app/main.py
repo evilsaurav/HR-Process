@@ -175,7 +175,9 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
+    import sys
+    view_mode = ft.AppView.WEB_BROWSER if "--web" in sys.argv else ft.AppView.FLET_APP
     if hasattr(ft, "run"):
-        ft.run(main)
+        ft.run(main, view=view_mode)
     else:
-        ft.app(target=main)
+        ft.app(target=main, view=view_mode)

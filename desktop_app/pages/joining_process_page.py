@@ -111,7 +111,6 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                 page_size_dropdown,
                 record_range_text,
             ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ft.Container(expand=True),
             ft.Row([
                 btn_prev_page,
                 page_indicator_text,
@@ -1213,26 +1212,30 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                 ])
             )
 
-        preview_dt = ft.DataTable(
-            columns=dt_columns,
-            rows=table_rows,
-            heading_row_color=COLOR_CARD_BG_HOVER,
-            border=ft.Border.all(1, COLOR_CARD_BORDER),
-            border_radius=8,
-            column_spacing=18,
-        )
-
-        table_container = ft.Container(
-            border=ft.Border.all(1, COLOR_CARD_BORDER),
-            border_radius=8,
-            content=ft.Row([preview_dt], scroll=ft.ScrollMode.AUTO),
-        )
+        try:
+            preview_dt = ft.DataTable(
+                columns=dt_columns,
+                rows=table_rows,
+                heading_row_color=COLOR_CARD_BG_HOVER,
+                border=ft.Border.all(1, COLOR_CARD_BORDER),
+                border_radius=8,
+                column_spacing=18,
+            )
+            table_container = ft.Container(
+                border=ft.Border.all(1, COLOR_CARD_BORDER),
+                border_radius=8,
+                content=ft.Row([preview_dt], scroll=ft.ScrollMode.AUTO),
+            )
+        except Exception as ex:
+            table_container = ft.Container(
+                padding=16,
+                content=ft.Text(f"Could not render preview table: {ex}", color=COLOR_ERROR),
+            )
 
         panel_items = [
             ft.Row([
                 ft.Icon(ft.Icons.PREVIEW_ROUNDED, color=PRIMARY_COLOR, size=20),
                 ft.Text(f"Visual File Preview: {file_name}", size=14, weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY),
-                ft.Container(expand=True),
                 ft.Text(
                     f"Showing first {min(10, len(target_rows))} of {len(target_rows)} in '{active_sheet}'" if target_rows else "",
                     size=11, color=COLOR_TEXT_MUTED
@@ -1487,7 +1490,6 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                         color=COLOR_TEXT_PRIMARY,
                     ),
                 ], spacing=8),
-                ft.Container(expand=True),
                 ft.Row([
                     secondary_button(
                         "Keep All Existing",
@@ -1602,16 +1604,14 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                     content=ft.Column([
                         ft.Row([
                             ft.Text(f"{idx+1}. {name}", size=14, weight=ft.FontWeight.BOLD, color=COLOR_TEXT_PRIMARY),
-                            ft.Container(expand=True),
                             status_badge(reason),
                         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                         ft.Row([existing_col, new_col], spacing=12),
                         ft.Row([
                             keep_btn,
                             replace_btn,
-                            ft.Container(expand=True),
                             status_note,
-                        ], spacing=8, alignment=ft.MainAxisAlignment.START, wrap=True),
+                        ], spacing=10, alignment=ft.MainAxisAlignment.START, wrap=True),
                     ], spacing=10),
                 )
 
@@ -1747,72 +1747,78 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         refresh_candidates(reset_page=True)
 
     # ---------------- File Upload Processing ----------------
+    _is_processing_upload = False
+
     def handle_spreadsheet_files(files):
-        if not files or len(files) == 0:
+        nonlocal _is_processing_upload
+        if _is_processing_upload or not files or len(files) == 0:
             return
+        _is_processing_upload = True
+        try:
+            picked = files[0]
+            file_path = getattr(picked, "path", None)
+            file_name = getattr(picked, "name", None) or (os.path.basename(file_path) if file_path else "unknown")
 
-        picked = files[0]
-        file_path = getattr(picked, "path", None)
-        file_name = getattr(picked, "name", None) or (os.path.basename(file_path) if file_path else "unknown")
-
-        upload_state["file_path"] = file_path
-        upload_state["file_name"] = file_name
-        upload_state["view_mode"] = "processing"
-        render_upload_ui()
-
-        # Step 1: Read & validate file without modifying database
-        extracted = sheet_processor.extract_candidate_rows_from_sheet(file_path)
-        if not extracted.get("success"):
-            upload_state["view_mode"] = "error"
-            upload_state["error_message"] = extracted.get("error") or "We couldn't process this file. Please check the file and try again."
+            upload_state["file_path"] = file_path
+            upload_state["file_name"] = file_name
+            upload_state["view_mode"] = "processing"
             render_upload_ui()
-            show_message(upload_state["error_message"], False)
-            return
 
-        valid_rows = extracted.get("valid_rows", [])
-        sheet_errors = extracted.get("errors", [])
-        total_sheet_rows = extracted.get("total_sheet_rows", len(valid_rows))
-        sheet_names = extracted.get("sheet_names", [])
-        sheet_counts = extracted.get("sheet_counts", {})
-        rows_by_sheet = extracted.get("rows_by_sheet", {})
-        detected_columns = extracted.get("detected_columns", [])
-        mapped_columns_count = extracted.get("mapped_columns_count", len(detected_columns))
+            # Step 1: Read & validate file without modifying database
+            extracted = sheet_processor.extract_candidate_rows_from_sheet(file_path)
+            if not extracted.get("success"):
+                upload_state["view_mode"] = "error"
+                upload_state["error_message"] = extracted.get("error") or "We couldn't process this file. Please check the file and try again."
+                render_upload_ui()
+                show_message(upload_state["error_message"], False)
+                return
 
-        if not sheet_names and valid_rows:
-            default_sheet = file_name or "Sheet1"
-            sheet_names = [default_sheet]
-            sheet_counts = {default_sheet: len(valid_rows)}
-            rows_by_sheet = {default_sheet: valid_rows}
+            valid_rows = extracted.get("valid_rows", [])
+            sheet_errors = extracted.get("errors", [])
+            total_sheet_rows = extracted.get("total_sheet_rows", len(valid_rows))
+            sheet_names = extracted.get("sheet_names", [])
+            sheet_counts = extracted.get("sheet_counts", {})
+            rows_by_sheet = extracted.get("rows_by_sheet", {})
+            detected_columns = extracted.get("detected_columns", [])
+            mapped_columns_count = extracted.get("mapped_columns_count", len(detected_columns))
 
-        # Step 2: Detect duplicates
-        dup_res = sheet_processor.detect_duplicates(valid_rows)
+            if not sheet_names and valid_rows:
+                default_sheet = file_name or "Sheet1"
+                sheet_names = [default_sheet]
+                sheet_counts = {default_sheet: len(valid_rows)}
+                rows_by_sheet = {default_sheet: valid_rows}
 
-        upload_state["file_path"] = file_path
-        upload_state["file_name"] = file_name
-        upload_state["sheet_names"] = sheet_names
-        upload_state["sheet_counts"] = sheet_counts
-        upload_state["rows_by_sheet"] = rows_by_sheet
-        upload_state["active_preview_sheet"] = sheet_names[0] if sheet_names else ""
-        upload_state["detected_columns"] = detected_columns
-        upload_state["mapped_columns_count"] = mapped_columns_count
-        upload_state["total_sheet_rows"] = total_sheet_rows
-        upload_state["valid_rows"] = valid_rows
-        upload_state["duplicates"] = dup_res.get("duplicates", [])
-        upload_state["new_rows"] = dup_res.get("new_rows", [])
-        upload_state["duplicate_percentage"] = dup_res.get("duplicate_percentage", 0.0)
-        upload_state["sheet_errors"] = sheet_errors
+            # Step 2: Detect duplicates
+            dup_res = sheet_processor.detect_duplicates(valid_rows)
 
-        dup_count = len(upload_state["duplicates"])
-        pct = upload_state["duplicate_percentage"]
+            upload_state["file_path"] = file_path
+            upload_state["file_name"] = file_name
+            upload_state["sheet_names"] = sheet_names
+            upload_state["sheet_counts"] = sheet_counts
+            upload_state["rows_by_sheet"] = rows_by_sheet
+            upload_state["active_preview_sheet"] = sheet_names[0] if sheet_names else ""
+            upload_state["detected_columns"] = detected_columns
+            upload_state["mapped_columns_count"] = mapped_columns_count
+            upload_state["total_sheet_rows"] = total_sheet_rows
+            upload_state["valid_rows"] = valid_rows
+            upload_state["duplicates"] = dup_res.get("duplicates", [])
+            upload_state["new_rows"] = dup_res.get("new_rows", [])
+            upload_state["duplicate_percentage"] = dup_res.get("duplicate_percentage", 0.0)
+            upload_state["sheet_errors"] = sheet_errors
 
-        if dup_count == 0:
-            upload_state["view_mode"] = "no_duplicates"
-        elif pct > 50.0:
-            upload_state["view_mode"] = "scenario_b_prompt"
-        else:
-            upload_state["view_mode"] = "scenario_a_review"
+            dup_count = len(upload_state["duplicates"])
+            pct = upload_state["duplicate_percentage"]
 
-        render_upload_ui()
+            if dup_count == 0:
+                upload_state["view_mode"] = "no_duplicates"
+            elif pct > 50.0:
+                upload_state["view_mode"] = "scenario_b_prompt"
+            else:
+                upload_state["view_mode"] = "scenario_a_review"
+
+            render_upload_ui()
+        finally:
+            _is_processing_upload = False
 
     def on_file_result(e):
         files = getattr(e, "files", e) if not isinstance(e, list) else e
@@ -1875,13 +1881,14 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
         modern_card(ft.Column([
             ft.Row([
                 section_title(ft.Icons.FILTER_LIST, "Candidate Pipeline"),
-                ft.Container(expand=True),
-                btn_review_send_welcome,
-                secondary_button(
-                    "Export to Excel",
-                    icon=ft.Icons.DOWNLOAD_ROUNDED,
-                    on_click=export_candidates_clicked,
-                ),
+                ft.Row([
+                    btn_review_send_welcome,
+                    secondary_button(
+                        "Export to Excel",
+                        icon=ft.Icons.DOWNLOAD_ROUNDED,
+                        on_click=export_candidates_clicked,
+                    ),
+                ], spacing=8),
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True),
             ft.Divider(height=10, color=COLOR_CARD_BORDER),
             ft.Row([

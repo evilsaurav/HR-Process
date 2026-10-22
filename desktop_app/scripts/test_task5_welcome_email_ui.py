@@ -122,7 +122,11 @@ def test_welcome_email_backend_and_ui():
 
     # Verify buttons present in the Pipeline card
     top_actions_row = pipeline_column.controls[0]
-    btn_review_send = top_actions_row.controls[2]
+    btn_review_send = None
+    if len(top_actions_row.controls) > 2:
+        btn_review_send = top_actions_row.controls[2]
+    elif len(top_actions_row.controls) > 1 and hasattr(top_actions_row.controls[1], "controls"):
+        btn_review_send = top_actions_row.controls[1].controls[0]
     assert btn_review_send is not None, "btn_review_send_welcome missing from top row"
 
     quick_filters_row = pipeline_column.controls[2]
