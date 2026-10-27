@@ -1,4 +1,5 @@
 import os
+from typing import Optional, List, Dict, Any
 import flet as ft
 from config import STATUS_OPTIONS, PRIMARY_COLOR, DESKTOP_APP_DIR
 from database import db_manager

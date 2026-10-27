@@ -2,7 +2,7 @@ import sqlite3
 import datetime
 import json
 import re
-from typing import Optional
+from typing import Optional, List, Dict, Any, Tuple
 from config import DB_PATH
 from services.encryption import encrypt_text, decrypt_text
 
