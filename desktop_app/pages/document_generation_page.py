@@ -29,6 +29,7 @@ from services import (
     zip_export_service,
 )
 from utils.email_preview_modal import open_email_preview_modal
+from utils.whatsapp_modal import open_whatsapp_outreach_modal
 from utils.ui_theme import (
     modern_card,
     page_header,
@@ -685,7 +686,30 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
                 on_click=make_edit_candidate_handler(),
             )
 
-            action_row = ft.Row([single_stage_btn, edit_candidate_btn], spacing=2)
+            def make_whatsapp_candidate_handler(cand_id=cid, c_name=cand_name, doc_t=sugg_type):
+                def do_open_whatsapp(e):
+                    cand_data = db_manager.get_candidate_by_id(cand_id) or {
+                        "id": cand_id,
+                        "candidate_name": c_name,
+                    }
+                    open_whatsapp_outreach_modal(
+                        page=page,
+                        candidate=cand_data,
+                        initial_message_type="document_release",
+                        document_type=doc_t,
+                        reference_number="",
+                        on_complete=refresh_detection_table
+                    )
+                return do_open_whatsapp
+
+            whatsapp_candidate_btn = ft.IconButton(
+                icon=ft.Icons.CHAT_ROUNDED,
+                icon_color="#25D366",
+                tooltip="Open 1-Click WhatsApp Direct Outreach",
+                on_click=make_whatsapp_candidate_handler(),
+            )
+
+            action_row = ft.Row([single_stage_btn, edit_candidate_btn, whatsapp_candidate_btn], spacing=2)
 
             rows.append(ft.DataRow(cells=[
                 ft.DataCell(chk),
@@ -1095,7 +1119,32 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
                 disabled=(status_val == "Dispatched"),
             )
 
-            actions_cell = ft.Row([preview_btn, fix_btn, discard_btn], spacing=2)
+            def make_whatsapp_staging_handler(staged_record=r):
+                c_id = staged_record.get("candidate_id")
+                cand_data = db_manager.get_candidate_by_id(c_id) or {
+                    "id": c_id,
+                    "candidate_name": staged_record.get("recipient_name"),
+                    "email": staged_record.get("recipient_email"),
+                }
+                d_type = staged_record.get("document_type", "offer")
+                r_num = staged_record.get("reference_number", "")
+                return lambda e: open_whatsapp_outreach_modal(
+                    page=page,
+                    candidate=cand_data,
+                    initial_message_type="document_release",
+                    document_type=d_type,
+                    reference_number=r_num,
+                    on_complete=refresh_staging_table
+                )
+
+            whatsapp_staging_btn = ft.IconButton(
+                icon=ft.Icons.CHAT_ROUNDED,
+                icon_color="#25D366",
+                tooltip="Send 1-Click WhatsApp Document Notification",
+                on_click=make_whatsapp_staging_handler(),
+            )
+
+            actions_cell = ft.Row([preview_btn, fix_btn, whatsapp_staging_btn, discard_btn], spacing=2)
 
             rows.append(ft.DataRow(cells=[
                 ft.DataCell(chk),
@@ -1867,11 +1916,24 @@ def document_generation_view(page: ft.Page, initial_tab: int = 0):
                 ),
             )
 
+            whatsapp_hist_btn = ft.IconButton(
+                icon=ft.Icons.CHAT_ROUNDED,
+                icon_color="#25D366",
+                tooltip="Send WhatsApp Document Alert",
+                on_click=lambda e, dt=h.get("document_type"), rn=ref_num: open_whatsapp_outreach_modal(
+                    page=page,
+                    candidate=state["selected_candidate"],
+                    initial_message_type="document_release",
+                    document_type=dt,
+                    reference_number=rn
+                ),
+            )
+
             rows.append(ft.DataRow(cells=[
                 ft.DataCell(ft.Text(doc_type_cap, weight=ft.FontWeight.W_500, color=COLOR_TEXT_PRIMARY)),
                 ft.DataCell(ft.Text(ref_num, color=COLOR_SUCCESS, weight=ft.FontWeight.BOLD)),
                 ft.DataCell(ft.Text(gen_date, size=12, color=COLOR_TEXT_MUTED)),
-                ft.DataCell(ft.Row([action_btn, email_btn], spacing=4)),
+                ft.DataCell(ft.Row([action_btn, email_btn, whatsapp_hist_btn], spacing=4)),
             ]))
 
         history_table = ft.DataTable(

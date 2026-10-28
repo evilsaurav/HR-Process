@@ -8,6 +8,7 @@ from services import excel_export_service
 from services import email_service
 from services import ai_service
 from services import candidate_outreach_service
+from utils.whatsapp_modal import open_whatsapp_outreach_modal
 from utils.flet_compat import register_overlay_control
 from utils.ui_theme import (
     modern_card,
@@ -1088,19 +1089,19 @@ def joining_process_view(page: ft.Page, initial_filter: Optional[str] = None):
                     )
 
                     def make_whatsapp_handler(cand_item=c):
-                        def on_copy_whatsapp(e):
-                            msg_text = candidate_outreach_service.generate_whatsapp_outreach_text(cand_item, "selection")
-                            try:
-                                page.set_clipboard(msg_text)
-                            except Exception:
-                                pass
-                            show_message(f"WhatsApp outreach text copied for '{cand_name}'! Ready to paste.", True)
-                        return on_copy_whatsapp
+                        def on_open_whatsapp(e):
+                            open_whatsapp_outreach_modal(
+                                page=page,
+                                candidate=cand_item,
+                                initial_message_type="selection",
+                                on_complete=load_candidates_data
+                            )
+                        return on_open_whatsapp
 
                     whatsapp_btn = ft.IconButton(
                         icon=ft.Icons.CHAT_ROUNDED,
-                        icon_color=COLOR_SUCCESS,
-                        tooltip="Copy WhatsApp Outreach Text",
+                        icon_color="#25D366",
+                        tooltip="Open 1-Click WhatsApp Direct Outreach",
                         on_click=make_whatsapp_handler(),
                     )
 
