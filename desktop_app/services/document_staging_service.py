@@ -20,6 +20,7 @@ from typing import Dict, Any, Optional, List, Callable, Tuple
 
 import docx
 from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from config import DESKTOP_APP_DIR
 from database import db_manager
@@ -130,6 +131,7 @@ def _render_document_to_file(
 
     date_text = document_generation_service.get_document_reference_date(candidate, document_type, extra_fields)
     document_generation_service.insert_reference_and_date(doc, reference_text, date_text, document_type)
+    document_generation_service.normalize_document_alignment_and_spacing(doc, document_type, candidate)
     doc.save(dest_docx_path)
 
 
@@ -152,27 +154,36 @@ def _restamp_docx_with_official_reference(
         norm_type = document_generation_service.normalize_document_type(document_type)
 
         stamped = False
-        for para in doc.paragraphs:
-            if "Reference No:" in para.text:
-                para.text = ""
-                if norm_type in ["experience_certificate", "salary_certificate"]:
-                    text = f"Reference No: {official_reference}" + (" " * 69) + f"Date: {date_text}"
-                    run = para.add_run(text)
-                    run.font.name = "Times New Roman"
-                    run.font.size = Pt(12)
-                    run.bold = True
-                else:
-                    text = f"Reference No: {official_reference}" + (" " * 81) + f"Dated: {date_text}"
-                    run = para.add_run(text)
-                    run.font.name = "Times New Roman"
-                    run.font.size = Pt(11)
-                    run.bold = True
-                stamped = True
-                break
+        # Update Reference No in table 0 if present (eliminating fragile space padding)
+        if doc.tables:
+            tbl = doc.tables[0]
+            if len(tbl.rows) == 1 and len(tbl.columns) == 2:
+                c0 = tbl.cell(0, 0)
+                if "Reference No:" in c0.text:
+                    p0 = c0.paragraphs[0]
+                    p0.text = ""
+                    p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    p0.paragraph_format.space_before = Pt(0)
+                    p0.paragraph_format.space_after = Pt(0)
+                    font_size = 12 if norm_type in ["experience_certificate", "salary_certificate"] else 11
+                    r0 = p0.add_run(f"Reference No: {official_reference}")
+                    r0.font.name = "Times New Roman"
+                    r0.font.size = Pt(font_size)
+                    r0.bold = True
+                    stamped = True
+
+        if not stamped:
+            for para in doc.paragraphs:
+                if "Reference No:" in para.text:
+                    para.text = ""
+                    document_generation_service.insert_reference_and_date(doc, official_reference, date_text, document_type)
+                    stamped = True
+                    break
 
         if not stamped:
             document_generation_service.insert_reference_and_date(doc, official_reference, date_text, document_type)
 
+        document_generation_service.normalize_document_alignment_and_spacing(doc, document_type, candidate)
         doc.save(docx_path)
         return True
     except Exception as ex:

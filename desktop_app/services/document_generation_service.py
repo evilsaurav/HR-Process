@@ -85,7 +85,7 @@ def build_placeholder_mapping(candidate: dict, document_type: str, extra_fields:
     end_date = calculate_end_date(date_joined_raw) if date_joined_raw else ""
 
     salary_raw = extra_fields.get("monthly_gross_salary") or extra_fields.get("gross_salary") or candidate.get("negotiated_salary")
-    pay_grade = format_currency_inr(salary_raw) if salary_raw else ""
+    pay_grade = format_currency_inr(salary_raw).lstrip("₹") if salary_raw else ""
     salary_words = amount_to_indian_words(salary_raw) if salary_raw else ""
 
     # Extra fields for extension
@@ -103,10 +103,10 @@ def build_placeholder_mapping(candidate: dict, document_type: str, extra_fields:
     eff_from_raw = extra_fields.get("effective_from")
     effective_from = format_date_long(eff_from_raw) if eff_from_raw else ""
     revised_salary_raw = extra_fields.get("revised_pay_grade")
-    revised_pay_grade = format_currency_inr(revised_salary_raw) if revised_salary_raw else ""
+    revised_pay_grade = format_currency_inr(revised_salary_raw).lstrip("₹") if revised_salary_raw else ""
     revised_salary_words = amount_to_indian_words(revised_salary_raw) if revised_salary_raw else ""
     offer_doc_date_raw = extra_fields.get("offer_letter_document_date")
-    offer_letter_document_date = format_date_long(offer_doc_date_raw) if offer_doc_date_raw else ""
+    offer_letter_document_date = format_date_long(offer_doc_date_raw) if offer_doc_date_raw else (date_joined or "")
 
     # Extra fields for certificate (experience / salary)
     if "exit_date" in extra_fields:
@@ -496,12 +496,24 @@ def resolve_template(document_type: str, candidate: dict, manual_designation_ove
     }
 
 
+def set_cell_margins_zero(cell) -> None:
+    """Sets Word table cell margins to 0 dxa for edge-to-edge margin alignment."""
+    tcPr = cell._tc.get_or_add_tcPr()
+    tcMar = OxmlElement('w:tcMar')
+    for m in ['top', 'left', 'bottom', 'right']:
+        node = OxmlElement(f'w:{m}')
+        node.set(qn('w:w'), '0')
+        node.set(qn('w:type'), 'dxa')
+        tcMar.append(node)
+    tcPr.append(tcMar)
+
+
 def insert_reference_and_date(doc, reference_number: str, date_text: str, document_type: str) -> None:
     """
     Inserts Reference Number and Dated line after the anchor paragraph (doc.paragraphs[0])
     using a 1-row, 2-column borderless Word table for robust, margin-aligned layout:
-    - Left Cell: Reference No: <clean_ref> (Left aligned)
-    - Right Cell: Dated: <clean_date> or Date: <clean_date> (Right aligned)
+    - Left Cell: Reference No: <clean_ref> (Left aligned, flush to left page margin)
+    - Right Cell: Dated: <clean_date> or Date: <clean_date> (Right aligned, flush to right page margin)
     - Font: Times New Roman, Bold, 11pt (12pt for Experience/Salary Certificates)
     """
     if not doc or not doc.paragraphs:
@@ -525,15 +537,21 @@ def insert_reference_and_date(doc, reference_number: str, date_text: str, docume
     # Move table XML element directly after doc.paragraphs[0]._element
     doc.paragraphs[0]._element.addnext(table._element)
 
-    # Set column widths: Column 0 = Inches(3.6), Column 1 = Inches(2.9)
-    table.columns[0].width = Inches(3.6)
-    table.columns[1].width = Inches(2.9)
+    # Compute usable width dynamically from document section margins
+    section = doc.sections[0]
+    usable_width = section.page_width - section.left_margin - section.right_margin
+    col0_w = int(usable_width * 0.55)
+    col1_w = int(usable_width - col0_w)
 
-    # Set explicit cell widths
+    table.columns[0].width = col0_w
+    table.columns[1].width = col1_w
+
     cell_0 = table.cell(0, 0)
     cell_1 = table.cell(0, 1)
-    cell_0.width = Inches(3.6)
-    cell_1.width = Inches(2.9)
+    cell_0.width = col0_w
+    cell_1.width = col1_w
+    set_cell_margins_zero(cell_0)
+    set_cell_margins_zero(cell_1)
 
     # Remove all borders
     tblPr = table._element.xpath('w:tblPr')
@@ -570,6 +588,290 @@ def insert_reference_and_date(doc, reference_number: str, date_text: str, docume
     run_1.bold = True
 
 
+def normalize_document_alignment_and_spacing(doc, document_type: str, candidate_data: dict = None) -> None:
+    """
+    Normalizes typography, spacing, and layout across all generated HR documents:
+    - Calibrates header table margins and column widths to match page margins flush.
+    - Collapses excessive empty paragraphs between header table and first content line.
+    - Strips accidental leading spaces on 'Sub:', 'Dear ', 'Greetings', 'To,', and '(Signature)'.
+    - Normalizes double/multiple whitespace inside runs.
+    - Eliminates redundant currency symbols (e.g. 'INR ₹' -> 'INR ').
+    - Fixes missing offer letter dates in increment letters.
+    - Adjusts offer letter line spacing and bullet points so it cleanly fits 2 pages with signature intact.
+    - Justifies body text and formats clean margins for certificates, extensions, and terminations.
+    """
+    if not doc:
+        return
+
+    doc_type_lower = (document_type or "").strip().lower()
+    section = doc.sections[0]
+    usable_width = section.page_width - section.left_margin - section.right_margin
+
+    # 1. Header Table Alignment
+    if doc.tables:
+        header_table = doc.tables[0]
+        if len(header_table.rows) == 1 and len(header_table.columns) == 2:
+            header_table.autofit = False
+            col0_w = int(usable_width * 0.55)
+            col1_w = int(usable_width - col0_w)
+            header_table.columns[0].width = col0_w
+            header_table.columns[1].width = col1_w
+            c0 = header_table.cell(0, 0)
+            c1 = header_table.cell(0, 1)
+            c0.width = col0_w
+            c1.width = col1_w
+            set_cell_margins_zero(c0)
+            set_cell_margins_zero(c1)
+
+            if c0.paragraphs:
+                c0.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+                c0.paragraphs[0].paragraph_format.space_before = Pt(0)
+                c0.paragraphs[0].paragraph_format.space_after = Pt(0)
+            if c1.paragraphs:
+                c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                c1.paragraphs[0].paragraph_format.space_before = Pt(0)
+                c1.paragraphs[0].paragraph_format.space_after = Pt(0)
+
+    is_offer = doc_type_lower in ["offer", "offer_letter"]
+    is_cert = doc_type_lower in ["experience", "experience_certificate", "salary", "salary_certificate"]
+    is_increment = doc_type_lower in ["increment", "increment_letter"]
+    is_extension = doc_type_lower in ["extension", "extension_letter"]
+    is_termination = doc_type_lower in ["termination", "termination_letter"]
+
+    # 2. Collapse excessive empty paragraphs at top (between Header Table and first text)
+    first_text_idx = -1
+    for i, p in enumerate(doc.paragraphs):
+        if p.text.strip():
+            first_text_idx = i
+            break
+
+    if first_text_idx > 1:
+        for i in range(1, first_text_idx - 1):
+            p = doc.paragraphs[i]
+            p.text = ""
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.line_spacing = Pt(1)
+            for r in p.runs:
+                r.font.size = Pt(1)
+
+        sep_p = doc.paragraphs[first_text_idx - 1]
+        sep_p.paragraph_format.space_before = Pt(0)
+        sep_p.paragraph_format.space_after = Pt(12 if is_cert else 10)
+        sep_p.paragraph_format.line_spacing = 1.0
+
+    # 3. Clean up run text: currency, accidental spaces, broken punctuation
+    candidate_date_joined = (candidate_data or {}).get("date_joined") or ""
+    for p in doc.paragraphs:
+        if not p.text.strip():
+            continue
+
+        # Strip accidental leading whitespace across initial runs
+        if p.runs and p.text.startswith(" "):
+            for r in p.runs:
+                if not r.text:
+                    continue
+                r.text = r.text.lstrip()
+                if r.text:
+                    break
+
+        # Strip accidental trailing whitespace across final runs
+        if p.runs and p.text.endswith(" "):
+            for r in reversed(p.runs):
+                if not r.text:
+                    continue
+                r.text = r.text.rstrip()
+                if r.text:
+                    break
+
+        # Replace currency and date artifacts inside runs
+        for r in p.runs:
+            if "INR ₹" in r.text:
+                r.text = r.text.replace("INR ₹", "INR ")
+            if "INR  ₹" in r.text:
+                r.text = r.text.replace("INR  ₹", "INR ")
+            if "offer letter Dated ." in r.text:
+                r.text = r.text.replace("offer letter Dated .", f"offer letter Dated {candidate_date_joined}." if candidate_date_joined else "offer letter Dated previously.")
+            # Remove double spaces inside runs
+            if "  " in r.text:
+                r.text = re.sub(r'[ \t]{2,}', ' ', r.text)
+
+    # 4. Paragraph flow and compacting by Document Type
+    if is_offer:
+        in_bullet_section = False
+        for p in doc.paragraphs:
+            t = p.text.strip()
+            if not t:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = Pt(1)
+                for r in p.runs:
+                    r.font.size = Pt(1)
+                continue
+
+            if t.startswith("To,"):
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.line_spacing = 1.0
+            elif t.startswith("Mr.") or t.startswith("Ms.") or t.startswith("S/o") or t.startswith("D/o"):
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.line_spacing = 1.0
+            elif t.startswith("R/o"):
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.line_spacing = 1.0
+            elif t.startswith("Sub:"):
+                p.paragraph_format.space_before = Pt(4)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.line_spacing = 1.0
+                for r in p.runs:
+                    r.bold = True
+            elif t.startswith("Dear "):
+                p.paragraph_format.space_before = Pt(4)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.line_spacing = 1.0
+                if not t.endswith(","):
+                    p.runs[-1].text = p.runs[-1].text.rstrip() + ","
+            elif t.startswith("Greetings"):
+                p.paragraph_format.space_before = Pt(2)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.line_spacing = 1.0
+            elif "Core Roles and Responsibilities include:" in t:
+                in_bullet_section = True
+                p.paragraph_format.space_before = Pt(2)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.line_spacing = 1.0
+                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            elif in_bullet_section:
+                if "For Doctors For You," in t:
+                    in_bullet_section = False
+                    p.paragraph_format.space_before = Pt(6)
+                    p.paragraph_format.space_after = Pt(2)
+                    p.paragraph_format.keep_with_next = True
+                elif t.startswith("o ") or t.startswith("• ") or t.startswith("- "):
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(1.5)
+                    p.paragraph_format.line_spacing = 1.0
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                else:
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(2.5)
+                    p.paragraph_format.line_spacing = 1.02
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            elif "For Doctors For You," in t:
+                p.paragraph_format.space_before = Pt(6)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.keep_with_next = True
+            elif "Assistant-HR Manager" in t or "HR Department" in t:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.keep_with_next = True
+            elif "I have read the terms" in t:
+                p.paragraph_format.space_before = Pt(6)
+                p.paragraph_format.space_after = Pt(3)
+                p.paragraph_format.line_spacing = 1.0
+                p.paragraph_format.keep_with_next = True
+            elif "(Signature)" in t:
+                p.paragraph_format.space_before = Pt(4)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = 1.0
+            else:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(2.5)
+                p.paragraph_format.line_spacing = 1.02
+                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+    elif is_cert:
+        for p in doc.paragraphs:
+            t = p.text.strip()
+            if not t:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = Pt(1)
+                for r in p.runs:
+                    r.font.size = Pt(1)
+                continue
+            if "to whomsoever this may concern" in t.lower():
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p.paragraph_format.space_before = Pt(12)
+                p.paragraph_format.space_after = Pt(16)
+                for r in p.runs:
+                    r.bold = True
+                    r.font.size = Pt(13)
+            elif t.startswith("This is to certify") or t.startswith("We highly acknowledged") or t.startswith("We wish") or "drawing a total monthly" in t:
+                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(10)
+                p.paragraph_format.line_spacing = 1.25
+                for r in p.runs:
+                    r.font.size = Pt(12)
+            elif "For Doctors For You," in t:
+                p.paragraph_format.space_before = Pt(20)
+                p.paragraph_format.space_after = Pt(16)
+                p.paragraph_format.keep_with_next = True
+            elif "HR Department" in t or "Sarita Bartwal" in t:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+
+    elif is_increment or is_extension or is_termination:
+        for p in doc.paragraphs:
+            t = p.text.strip()
+            if not t:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = Pt(1)
+                for r in p.runs:
+                    r.font.size = Pt(1)
+                continue
+            if t.startswith("To,") or t.startswith("Mr.") or t.startswith("Ms.") or t.startswith("S/o") or t.startswith("D/o"):
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.line_spacing = 1.0
+            elif t.startswith("R/o"):
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.line_spacing = 1.0
+            elif t.startswith("Sub:"):
+                p.paragraph_format.space_before = Pt(4)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.line_spacing = 1.0
+                for r in p.runs:
+                    r.bold = True
+            elif t.startswith("Dear "):
+                p.paragraph_format.space_before = Pt(4)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.line_spacing = 1.0
+                if not t.endswith(","):
+                    p.runs[-1].text = p.runs[-1].text.rstrip() + ","
+            elif t.startswith("Greetings"):
+                p.paragraph_format.space_before = Pt(2)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.line_spacing = 1.0
+            elif "For Doctors For You," in t:
+                p.paragraph_format.space_before = Pt(12)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.keep_with_next = True
+            elif "Assistant-HR Manager" in t or "HR Department" in t or "Authorized Signatory" in t:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.keep_with_next = True
+            elif "I have read" in t or "I acknowledge" in t:
+                p.paragraph_format.space_before = Pt(6)
+                p.paragraph_format.space_after = Pt(4)
+                p.paragraph_format.line_spacing = 1.0
+                p.paragraph_format.keep_with_next = True
+            elif "(Signature)" in t:
+                p.paragraph_format.space_before = Pt(4)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = 1.0
+            else:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(4)
+                p.paragraph_format.line_spacing = 1.15
+                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+
 def inject_certificate_paragraphs(doc, mapping: dict, document_type: str) -> None:
     """
     Dynamically injects certificate body paragraphs into docx templates
@@ -587,51 +889,54 @@ def inject_certificate_paragraphs(doc, mapping: dict, document_type: str) -> Non
         if "to whomsoever this may concern" in para.text.lower():
             p = para._element
 
-            blank1 = OxmlElement("w:p")
-            p.addnext(blank1)
-
             new_p1 = OxmlElement("w:p")
-            blank1.addnext(new_p1)
+            p.addnext(new_p1)
 
             para1 = Paragraph(new_p1, para._parent)
             run1 = para1.add_run(main_para)
             run1.font.name = "Times New Roman"
             run1.font.size = Pt(12)
             para1.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-
-            blank2 = OxmlElement("w:p")
-            new_p1.addnext(blank2)
+            para1.paragraph_format.space_before = Pt(0)
+            para1.paragraph_format.space_after = Pt(10)
+            para1.paragraph_format.line_spacing = 1.25
 
             if is_salary:
                 new_p2 = OxmlElement("w:p")
-                blank2.addnext(new_p2)
+                new_p1.addnext(new_p2)
 
                 para2 = Paragraph(new_p2, para._parent)
                 run2 = para2.add_run(salary_para)
                 run2.font.name = "Times New Roman"
                 run2.font.size = Pt(12)
                 para2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                para2.paragraph_format.space_before = Pt(0)
+                para2.paragraph_format.space_after = Pt(10)
+                para2.paragraph_format.line_spacing = 1.25
             else:
                 new_p2 = OxmlElement("w:p")
-                blank2.addnext(new_p2)
+                new_p1.addnext(new_p2)
 
                 para2 = Paragraph(new_p2, para._parent)
                 run2 = para2.add_run(appreciation_para)
                 run2.font.name = "Times New Roman"
                 run2.font.size = Pt(12)
                 para2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-
-                blank3 = OxmlElement("w:p")
-                new_p2.addnext(blank3)
+                para2.paragraph_format.space_before = Pt(0)
+                para2.paragraph_format.space_after = Pt(10)
+                para2.paragraph_format.line_spacing = 1.25
 
                 new_p3 = OxmlElement("w:p")
-                blank3.addnext(new_p3)
+                new_p2.addnext(new_p3)
 
                 para3 = Paragraph(new_p3, para._parent)
                 run3 = para3.add_run(future_line)
                 run3.font.name = "Times New Roman"
                 run3.font.size = Pt(12)
                 para3.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                para3.paragraph_format.space_before = Pt(0)
+                para3.paragraph_format.space_after = Pt(10)
+                para3.paragraph_format.line_spacing = 1.25
 
             break
 
@@ -696,6 +1001,7 @@ def generate_preview_document(
 
     date_text = get_document_reference_date(candidate, document_type, extra_fields)
     insert_reference_and_date(doc, previewed_ref, date_text, document_type)
+    normalize_document_alignment_and_spacing(doc, document_type, candidate)
 
     # Save to temp preview folder
     previews_dir = os.path.join(DESKTOP_APP_DIR, "output", "previews")
@@ -789,6 +1095,7 @@ def finalize_document(
 
     date_text = get_document_reference_date(candidate, document_type, extra_fields)
     insert_reference_and_date(doc, ref_num, date_text, document_type)
+    normalize_document_alignment_and_spacing(doc, document_type, candidate)
 
     # Save to generated_documents folder
     gen_dir = os.path.join(DESKTOP_APP_DIR, "output", "generated_documents")
